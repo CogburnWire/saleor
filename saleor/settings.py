@@ -566,13 +566,10 @@ if "JAEGER_AGENT_HOST" in os.environ:
 REDIS_URL = os.environ.get("REDIS_URL")
 if REDIS_URL:
     CACHE_URL = os.environ.setdefault("CACHE_URL", REDIS_URL)
-CACHES = {
-    "default": {
-        **django_cache_url.config(),
-        "CONNECTION_POOL_KWARGS": {
-            "ssl_cert_reqs": None
-        },
-    }
+CACHES = {"default": django_cache_url.config()}
+# heroku fix for redis ssl
+CACHES["default"]["OPTIONS"]["CONNECTION_POOL_KWARGS"] = {
+    "ssl_cert_reqs": None
 }
 
 # Default False because storefront and dashboard don't support expiration of token
