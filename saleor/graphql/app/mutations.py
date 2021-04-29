@@ -3,11 +3,11 @@ from typing import List
 import graphene
 import requests
 from django.core.exceptions import ValidationError
-from django.core.validators import URLValidator
 
 from ...app import models
 from ...app.error_codes import AppErrorCode
 from ...app.tasks import install_app_task
+from ...app.validators import AppURLValidator
 from ...core import JobStatus
 from ...core.permissions import (
     AppPermission,
@@ -29,10 +29,6 @@ from .utils import ensure_can_manage_permissions
 
 class AppInput(graphene.InputObjectType):
     name = graphene.String(description="Name of the app.")
-    is_active = graphene.Boolean(
-        description="DEPRECATED: Use the `appActivate` and `appDeactivate` mutations "
-        "instead. This field will be removed after 2020-07-31.",
-    )
     permissions = graphene.List(
         PermissionEnum,
         description="List of permission code names to assign to this app.",
@@ -376,7 +372,7 @@ class AppInstall(ModelMutation):
 
     @classmethod
     def clean_manifest_url(self, url):
-        url_validator = URLValidator()
+        url_validator = AppURLValidator()
         try:
             url_validator(url)
         except (ValidationError, AttributeError):
@@ -443,7 +439,7 @@ class AppFetchManifest(BaseMutation):
 
     @classmethod
     def clean_manifest_url(cls, manifest_url):
-        url_validator = URLValidator()
+        url_validator = AppURLValidator()
         try:
             url_validator(manifest_url)
         except (ValidationError, AttributeError):

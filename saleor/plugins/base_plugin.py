@@ -20,34 +20,29 @@ from .models import PluginConfiguration
 if TYPE_CHECKING:
     # flake8: noqa
     from ..account.models import Address, User
-    from ..channel.models import Channel
-    from ..checkout import CheckoutLineInfo
-    from ..checkout.models import Checkout, CheckoutLine
+    from ..checkout.fetch import CheckoutInfo, CheckoutLineInfo
+    from ..checkout.models import Checkout
+    from ..core.notify_events import NotifyEventType
     from ..core.taxes import TaxType
     from ..discount import DiscountInfo
     from ..invoice.models import Invoice
     from ..order.models import Fulfillment, Order, OrderLine
     from ..page.models import Page
-    from ..product.models import (
-        Collection,
-        Product,
-        ProductType,
-        ProductVariant,
-        ProductVariantChannelListing,
-    )
-
+    from ..product.models import Product, ProductType, ProductVariant
 
 PluginConfigurationType = List[dict]
 
 
 class ConfigurationTypeField:
     STRING = "String"
+    MULTILINE = "Multiline"
     BOOLEAN = "Boolean"
     SECRET = "Secret"
     SECRET_MULTILINE = "SecretMultiline"
     PASSWORD = "Password"
     CHOICES = [
         (STRING, "Field is a String"),
+        (MULTILINE, "Field is a Multiline"),
         (BOOLEAN, "Field is a Boolean"),
         (SECRET, "Field is a Secret"),
         (PASSWORD, "Field is a Password"),
@@ -145,6 +140,13 @@ class BasePlugin:
         """
         return NotImplemented
 
+    def notify(self, event: "NotifyEventType", payload: dict, previous_value):
+        """Handle notification request.
+
+        Overwrite this method if the plugin is responsible for sending notifications.
+        """
+        return NotImplemented
+
     def change_user_address(
         self,
         address: "Address",
@@ -156,7 +158,7 @@ class BasePlugin:
 
     def calculate_checkout_total(
         self,
-        checkout: "Checkout",
+        checkout_info: "CheckoutInfo",
         lines: List["CheckoutLineInfo"],
         address: Optional["Address"],
         discounts: List["DiscountInfo"],
@@ -169,24 +171,9 @@ class BasePlugin:
         """
         return NotImplemented
 
-    def calculate_checkout_subtotal(
-        self,
-        checkout: "Checkout",
-        lines: List["CheckoutLineInfo"],
-        address: Optional["Address"],
-        discounts: List["DiscountInfo"],
-        previous_value: TaxedMoney,
-    ) -> TaxedMoney:
-        """Calculate the subtotal for checkout.
-
-        Overwrite this method if you need to apply specific logic for the calculation
-        of a checkout subtotal. Return TaxedMoney.
-        """
-        return NotImplemented
-
     def calculate_checkout_shipping(
         self,
-        checkout: "Checkout",
+        checkout_info: "CheckoutInfo",
         lines: List["CheckoutLineInfo"],
         address: Optional["Address"],
         discounts: List["DiscountInfo"],
@@ -209,13 +196,12 @@ class BasePlugin:
         """
         return NotImplemented
 
-    # TODO: Add information about this change to `breaking changes in changelog`
     def calculate_checkout_line_total(
         self,
-        checkout: "Checkout",
+        checkout_info: "CheckoutInfo",
+        lines: List["CheckoutLineInfo"],
         checkout_line_info: "CheckoutLineInfo",
         address: Optional["Address"],
-        channel: "Channel",
         discounts: Iterable["DiscountInfo"],
         previous_value: TaxedMoney,
     ) -> TaxedMoney:
@@ -226,13 +212,28 @@ class BasePlugin:
         """
         return NotImplemented
 
+    def calculate_order_line_total(
+        self,
+        order: "Order",
+        order_line: "OrderLine",
+        variant: "ProductVariant",
+        product: "Product",
+        previous_value: TaxedMoney,
+    ) -> TaxedMoney:
+        """Calculate order line total.
+
+        Overwrite this method if you need to apply specific logic for the calculation
+        of a order line total. Return TaxedMoney.
+        """
+        return NotImplemented
+
     def calculate_checkout_line_unit_price(
         self,
-        checkout: "Checkout",
+        checkout_info: "CheckoutInfo",
+        lines: List["CheckoutLineInfo"],
         checkout_line_info: "CheckoutLineInfo",
         address: Optional["Address"],
         discounts: Iterable["DiscountInfo"],
-        channel: "Channel",
         previous_value: TaxedMoney,
     ):
         """Calculate checkout line unit price."""
@@ -257,7 +258,8 @@ class BasePlugin:
 
     def get_checkout_line_tax_rate(
         self,
-        checkout: "Checkout",
+        checkout_info: "CheckoutInfo",
+        lines: List["CheckoutLineInfo"],
         checkout_line_info: "CheckoutLineInfo",
         address: Optional["Address"],
         discounts: Iterable["DiscountInfo"],
@@ -269,6 +271,7 @@ class BasePlugin:
         self,
         order: "Order",
         product: "Product",
+        variant: "ProductVariant",
         address: Optional["Address"],
         previous_value: Decimal,
     ) -> Decimal:
@@ -276,7 +279,7 @@ class BasePlugin:
 
     def get_checkout_shipping_tax_rate(
         self,
-        checkout: "Checkout",
+        checkout_info: "CheckoutInfo",
         lines: Iterable["CheckoutLineInfo"],
         address: Optional["Address"],
         discounts: Iterable["DiscountInfo"],
@@ -331,7 +334,11 @@ class BasePlugin:
         return NotImplemented
 
     def preprocess_order_creation(
-        self, checkout: "Checkout", discounts: List["DiscountInfo"], previous_value: Any
+        self,
+        checkout_info: "CheckoutInfo",
+        discounts: List["DiscountInfo"],
+        lines: Optional[Iterable["CheckoutLineInfo"]],
+        previous_value: Any,
     ):
         """Trigger directly before order creation.
 
@@ -413,6 +420,14 @@ class BasePlugin:
         """
         return NotImplemented
 
+    def customer_updated(self, customer: "User", previous_value: Any) -> Any:
+        """Trigger when user is updated.
+
+        Overwrite this method if you need to trigger specific logic after a user is
+        updated.
+        """
+        return NotImplemented
+
     def product_created(self, product: "Product", previous_value: Any) -> Any:
         """Trigger when product is created.
 
@@ -436,6 +451,36 @@ class BasePlugin:
 
         Overwrite this method if you need to trigger specific logic after a product is
         deleted.
+        """
+        return NotImplemented
+
+    def product_variant_created(
+        self, product_variant: "ProductVariant", previous_value: Any
+    ) -> Any:
+        """Trigger when product variant is created.
+
+        Overwrite this method if you need to trigger specific logic after a product
+        variant is created.
+        """
+        return NotImplemented
+
+    def product_variant_updated(
+        self, product_variant: "ProductVariant", previous_value: Any
+    ) -> Any:
+        """Trigger when product variant is updated.
+
+        Overwrite this method if you need to trigger specific logic after a product
+        variant is updated.
+        """
+        return NotImplemented
+
+    def product_variant_deleted(
+        self, product_variant: "ProductVariant", previous_value: Any
+    ) -> Any:
+        """Trigger when product variant is deleted.
+
+        Overwrite this method if you need to trigger specific logic after a product
+        variant is deleted.
         """
         return NotImplemented
 
@@ -577,28 +622,22 @@ class BasePlugin:
     def token_is_required_as_payment_input(self, previous_value):
         return previous_value
 
-    def get_payment_gateway(
-        self, currency: Optional[str], previous_value
-    ) -> Optional["PaymentGateway"]:
+    def get_payment_gateways(
+        self, currency: Optional[str], checkout: Optional["Checkout"], previous_value
+    ) -> List["PaymentGateway"]:
         payment_config = self.get_payment_config(previous_value)
         payment_config = payment_config if payment_config != NotImplemented else []
         currencies = self.get_supported_currencies(previous_value=[])
         currencies = currencies if currencies != NotImplemented else []
         if currency and currency not in currencies:
-            return None
-        return PaymentGateway(
+            return []
+        gateway = PaymentGateway(
             id=self.PLUGIN_ID,
             name=self.PLUGIN_NAME,
             config=payment_config,
             currencies=currencies,
         )
-
-    def get_payment_gateway_for_checkout(
-        self,
-        checkout: "Checkout",
-        previous_value,
-    ) -> Optional["PaymentGateway"]:
-        return self.get_payment_gateway(checkout.currency, previous_value)
+        return [gateway]
 
     @classmethod
     def _update_config_items(

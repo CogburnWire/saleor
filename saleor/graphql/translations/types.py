@@ -3,6 +3,7 @@ from django.conf import settings
 
 from ...attribute import models as attribute_models
 from ...core.permissions import DiscountPermissions, ShippingPermissions
+from ...core.tracing import traced_resolver
 from ...discount import models as discount_models
 from ...menu import models as menu_models
 from ...page import models as page_models
@@ -11,10 +12,10 @@ from ...shipping import models as shipping_models
 from ...site import models as site_models
 from ..channel import ChannelContext
 from ..core.connection import CountableDjangoObjectType
+from ..core.enums import LanguageCodeEnum
 from ..core.types import LanguageDisplay
 from ..core.utils import str_to_enum
 from ..decorators import permission_required
-from .enums import LanguageCodeEnum
 from .fields import TranslationField
 
 BASIC_TRANSLATABLE_FIELDS = ["id", "name"]
@@ -36,6 +37,7 @@ class BaseTranslationType(CountableDjangoObjectType):
         abstract = True
 
     @staticmethod
+    @traced_resolver
     def resolve_language(root, *_args):
         try:
             language = next(
@@ -54,7 +56,7 @@ class AttributeValueTranslation(BaseTranslationType):
     class Meta:
         model = attribute_models.AttributeValueTranslation
         interfaces = [graphene.relay.Node]
-        only_fields = BASIC_TRANSLATABLE_FIELDS
+        only_fields = BASIC_TRANSLATABLE_FIELDS + ["rich_text"]
 
 
 class AttributeValueTranslatableContent(CountableDjangoObjectType):
@@ -143,7 +145,8 @@ class ProductTranslation(BaseTranslationType):
 
     @staticmethod
     def resolve_description_json(root: product_models.ProductTranslation, _info):
-        return root.description
+        description = root.description
+        return description if description is not None else {}
 
 
 class ProductTranslatableContent(CountableDjangoObjectType):
@@ -170,7 +173,8 @@ class ProductTranslatableContent(CountableDjangoObjectType):
 
     @staticmethod
     def resolve_description_json(root: product_models.Product, _info):
-        return root.description
+        description = root.description
+        return description if description is not None else {}
 
 
 class CollectionTranslation(BaseTranslationType):
@@ -188,7 +192,8 @@ class CollectionTranslation(BaseTranslationType):
 
     @staticmethod
     def resolve_description_json(root: product_models.CollectionTranslation, _info):
-        return root.description
+        description = root.description
+        return description if description is not None else {}
 
 
 class CollectionTranslatableContent(CountableDjangoObjectType):
@@ -210,6 +215,7 @@ class CollectionTranslatableContent(CountableDjangoObjectType):
         only_fields = EXTENDED_TRANSLATABLE_FIELDS
 
     @staticmethod
+    @traced_resolver
     def resolve_collection(root: product_models.Collection, info):
         collection = product_models.Collection.objects.all().filter(pk=root.id).first()
         return (
@@ -218,7 +224,8 @@ class CollectionTranslatableContent(CountableDjangoObjectType):
 
     @staticmethod
     def resolve_description_json(root: product_models.Collection, _info):
-        return root.description
+        description = root.description
+        return description if description is not None else {}
 
 
 class CategoryTranslation(BaseTranslationType):
@@ -236,7 +243,8 @@ class CategoryTranslation(BaseTranslationType):
 
     @staticmethod
     def resolve_description_json(root: product_models.CategoryTranslation, _info):
-        return root.description
+        description = root.description
+        return description if description is not None else {}
 
 
 class CategoryTranslatableContent(CountableDjangoObjectType):
@@ -263,7 +271,8 @@ class CategoryTranslatableContent(CountableDjangoObjectType):
 
     @staticmethod
     def resolve_description_json(root: product_models.Category, _info):
-        return root.description
+        description = root.description
+        return description if description is not None else {}
 
 
 class PageTranslation(BaseTranslationType):
@@ -287,7 +296,8 @@ class PageTranslation(BaseTranslationType):
 
     @staticmethod
     def resolve_content_json(root: page_models.PageTranslation, _info):
-        return root.content
+        content = root.content
+        return content if content is not None else {}
 
 
 class PageTranslatableContent(CountableDjangoObjectType):
@@ -318,6 +328,7 @@ class PageTranslatableContent(CountableDjangoObjectType):
         ]
 
     @staticmethod
+    @traced_resolver
     def resolve_page(root: page_models.Page, info):
         return (
             page_models.Page.objects.visible_to_user(info.context.user)
@@ -326,8 +337,9 @@ class PageTranslatableContent(CountableDjangoObjectType):
         )
 
     @staticmethod
-    def resolve_description_json(root: page_models.Page, _info):
-        return root.content
+    def resolve_content_json(root: page_models.Page, _info):
+        content = root.content
+        return content if content is not None else {}
 
 
 class VoucherTranslation(BaseTranslationType):
@@ -425,7 +437,7 @@ class ShippingMethodTranslation(BaseTranslationType):
     class Meta:
         model = shipping_models.ShippingMethodTranslation
         interfaces = [graphene.relay.Node]
-        only_fields = BASIC_TRANSLATABLE_FIELDS
+        only_fields = BASIC_TRANSLATABLE_FIELDS + ["description"]
 
 
 class ShippingMethodTranslatableContent(CountableDjangoObjectType):
@@ -443,7 +455,7 @@ class ShippingMethodTranslatableContent(CountableDjangoObjectType):
     class Meta:
         model = shipping_models.ShippingMethod
         interfaces = [graphene.relay.Node]
-        only_fields = BASIC_TRANSLATABLE_FIELDS
+        only_fields = BASIC_TRANSLATABLE_FIELDS + ["description"]
 
     @staticmethod
     @permission_required(ShippingPermissions.MANAGE_SHIPPING)

@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import graphene
 import pytest
@@ -181,6 +181,44 @@ def test_collections_query(
     )
 
 
+def test_collections_query_without_description(
+    user_api_client,
+    published_collection,
+    unpublished_collection,
+    permission_manage_products,
+    channel_USD,
+):
+    query = """
+        query Collections ($channel: String) {
+            collections(first:2, channel: $channel) {
+                edges {
+                    node {
+                        name
+                        slug
+                        description
+                        descriptionJson
+                    }
+                }
+            }
+        }
+    """
+
+    # query public collections only as regular user
+    variables = {"channel": channel_USD.slug}
+    collection = published_collection
+    collection.description = None
+    collection.save()
+    response = user_api_client.post_graphql(query, variables)
+    content = get_graphql_content(response)
+    edges = content["data"]["collections"]["edges"]
+    assert len(edges) == 1
+    collection_data = edges[0]["node"]
+    assert collection_data["name"] == collection.name
+    assert collection_data["slug"] == collection.slug
+    assert collection_data["description"] is None
+    assert collection_data["descriptionJson"] == "{}"
+
+
 def test_collections_query_as_staff(
     staff_api_client,
     published_collection,
@@ -308,6 +346,7 @@ def test_filter_collection_products_by_multiple_attributes(
 
     filters = {
         "attributes": [{"slug": "modes", "values": ["eco"]}],
+        "channel": channel_USD.slug,
     }
     variables = {
         "id": graphene.Node.to_global_id("Collection", published_collection.pk),
@@ -360,7 +399,7 @@ CREATE_COLLECTION_MUTATION = """
                         alt
                     }
                 }
-                collectionErrors {
+                errors {
                     field
                     message
                     code
@@ -414,6 +453,40 @@ def test_create_collection(
     assert data["backgroundImage"]["alt"] == image_alt
 
 
+@patch("saleor.plugins.manager.PluginsManager.product_updated")
+def test_create_collection_trigger_product_update_webhook(
+    product_updated_mock,
+    staff_api_client,
+    product_list,
+    media_root,
+    permission_manage_products,
+):
+    query = CREATE_COLLECTION_MUTATION
+
+    product_ids = [to_global_id("Product", product.pk) for product in product_list]
+    name = "test-name"
+    slug = "test-slug"
+    description = dummy_editorjs("description", True)
+    variables = {
+        "name": name,
+        "slug": slug,
+        "description": description,
+        "products": product_ids,
+    }
+
+    response = staff_api_client.post_graphql(
+        query, variables, permissions=[permission_manage_products]
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["collectionCreate"]["collection"]
+
+    assert data["name"] == name
+    assert data["slug"] == slug
+    assert data["description"] == description
+    assert data["products"]["totalCount"] == len(product_ids)
+    assert len(product_ids) == product_updated_mock.call_count
+
+
 def test_create_collection_without_background_image(
     monkeypatch, staff_api_client, product_list, permission_manage_products
 ):
@@ -456,7 +529,7 @@ def test_create_collection_with_given_slug(
     )
     content = get_graphql_content(response)
     data = content["data"]["collectionCreate"]
-    assert not data["collectionErrors"]
+    assert not data["errors"]
     assert data["collection"]["slug"] == expected_slug
 
 
@@ -471,7 +544,7 @@ def test_create_collection_name_with_unicode(
     )
     content = get_graphql_content(response)
     data = content["data"]["collectionCreate"]
-    assert not data["collectionErrors"]
+    assert not data["errors"]
     assert data["collection"]["name"] == name
     assert data["collection"]["slug"] == "わたし-わ-にっぽん-です"
 
@@ -627,7 +700,7 @@ UPDATE_COLLECTION_SLUG_MUTATION = """
                 name
                 slug
             }
-            collectionErrors {
+            errors {
                 field
                 message
                 code
@@ -665,7 +738,7 @@ def test_update_collection_slug(
     )
     content = get_graphql_content(response)
     data = content["data"]["collectionUpdate"]
-    errors = data["collectionErrors"]
+    errors = data["errors"]
     if not error_message:
         assert not errors
         assert data["collection"]["slug"] == expected_slug
@@ -696,7 +769,7 @@ def test_update_collection_slug_exists(
     )
     content = get_graphql_content(response)
     data = content["data"]["collectionUpdate"]
-    errors = data["collectionErrors"]
+    errors = data["errors"]
     assert errors
     assert errors[0]["field"] == "slug"
     assert errors[0]["code"] == ProductErrorCode.UNIQUE.name
@@ -736,7 +809,7 @@ def test_update_collection_slug_and_name(
                     name
                     slug
                 }
-                collectionErrors {
+                errors {
                     field
                     message
                     code
@@ -759,7 +832,7 @@ def test_update_collection_slug_and_name(
     content = get_graphql_content(response)
     collection.refresh_from_db()
     data = content["data"]["collectionUpdate"]
-    errors = data["collectionErrors"]
+    errors = data["errors"]
     if not error_message:
         assert data["collection"]["name"] == input_name == collection.name
         assert data["collection"]["slug"] == input_slug == collection.slug
@@ -769,16 +842,25 @@ def test_update_collection_slug_and_name(
         assert errors[0]["code"] == ProductErrorCode.REQUIRED.name
 
 
-def test_delete_collection(staff_api_client, collection, permission_manage_products):
-    query = """
-        mutation deleteCollection($id: ID!) {
-            collectionDelete(id: $id) {
-                collection {
-                    name
-                }
+DELETE_COLLECTION_MUTATION = """
+    mutation deleteCollection($id: ID!) {
+        collectionDelete(id: $id) {
+            collection {
+                name
             }
         }
-    """
+    }
+"""
+
+
+@patch("saleor.product.signals.delete_versatile_image")
+def test_delete_collection(
+    delete_versatile_image_mock,
+    staff_api_client,
+    collection,
+    permission_manage_products,
+):
+    query = DELETE_COLLECTION_MUTATION
     collection_id = to_global_id("Collection", collection.id)
     variables = {"id": collection_id}
     response = staff_api_client.post_graphql(
@@ -789,6 +871,60 @@ def test_delete_collection(staff_api_client, collection, permission_manage_produ
     assert data["name"] == collection.name
     with pytest.raises(collection._meta.model.DoesNotExist):
         collection.refresh_from_db()
+    delete_versatile_image_mock.assert_not_called()
+
+
+@patch("saleor.product.signals.delete_versatile_image")
+def test_delete_collection_with_background_image(
+    delete_versatile_image_mock,
+    staff_api_client,
+    collection_with_image,
+    permission_manage_products,
+):
+    query = DELETE_COLLECTION_MUTATION
+    collection = collection_with_image
+    collection_id = to_global_id("Collection", collection.id)
+    variables = {"id": collection_id}
+    response = staff_api_client.post_graphql(
+        query, variables, permissions=[permission_manage_products]
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["collectionDelete"]["collection"]
+    assert data["name"] == collection.name
+    with pytest.raises(collection._meta.model.DoesNotExist):
+        collection.refresh_from_db()
+    delete_versatile_image_mock.assert_called_once_with(collection.background_image)
+
+
+@patch("saleor.plugins.manager.PluginsManager.product_updated")
+def test_delete_collection_trigger_product_updated_webhook(
+    product_updated_mock,
+    staff_api_client,
+    collection,
+    product_list,
+    permission_manage_products,
+):
+    query = """
+        mutation deleteCollection($id: ID!) {
+            collectionDelete(id: $id) {
+                collection {
+                    name
+                }
+            }
+        }
+    """
+    collection.products.add(*product_list)
+    collection_id = to_global_id("Collection", collection.id)
+    variables = {"id": collection_id}
+    response = staff_api_client.post_graphql(
+        query, variables, permissions=[permission_manage_products]
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["collectionDelete"]["collection"]
+    assert data["name"] == collection.name
+    with pytest.raises(collection._meta.model.DoesNotExist):
+        collection.refresh_from_db()
+    assert len(product_list) == product_updated_mock.call_count
 
 
 def test_add_products_to_collection(
@@ -808,14 +944,47 @@ def test_add_products_to_collection(
     """
     collection_id = to_global_id("Collection", collection.id)
     product_ids = [to_global_id("Product", product.pk) for product in product_list]
-    no_products_before = collection.products.count()
+    products_before = collection.products.count()
     variables = {"id": collection_id, "products": product_ids}
     response = staff_api_client.post_graphql(
         query, variables, permissions=[permission_manage_products]
     )
     content = get_graphql_content(response)
     data = content["data"]["collectionAddProducts"]["collection"]
-    assert data["products"]["totalCount"] == no_products_before + len(product_ids)
+    assert data["products"]["totalCount"] == products_before + len(product_ids)
+
+
+@patch("saleor.plugins.manager.PluginsManager.product_updated")
+def test_add_products_to_collection_trigger_product_updated_webhook(
+    product_updated_mock,
+    staff_api_client,
+    collection,
+    product_list,
+    permission_manage_products,
+):
+    query = """
+        mutation collectionAddProducts(
+            $id: ID!, $products: [ID]!) {
+            collectionAddProducts(collectionId: $id, products: $products) {
+                collection {
+                    products {
+                        totalCount
+                    }
+                }
+            }
+        }
+    """
+    collection_id = to_global_id("Collection", collection.id)
+    product_ids = [to_global_id("Product", product.pk) for product in product_list]
+    products_before = collection.products.count()
+    variables = {"id": collection_id, "products": product_ids}
+    response = staff_api_client.post_graphql(
+        query, variables, permissions=[permission_manage_products]
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["collectionAddProducts"]["collection"]
+    assert data["products"]["totalCount"] == products_before + len(product_ids)
+    assert len(product_list) == product_updated_mock.call_count
 
 
 def test_add_products_to_collection_with_product_without_variants(
@@ -830,7 +999,7 @@ def test_add_products_to_collection_with_product_without_variants(
                         totalCount
                     }
                 }
-                collectionErrors {
+                errors {
                     field
                     message
                     code
@@ -846,7 +1015,7 @@ def test_add_products_to_collection_with_product_without_variants(
         query, variables, permissions=[permission_manage_products]
     )
     content = get_graphql_content(response)
-    error = content["data"]["collectionAddProducts"]["collectionErrors"][0]
+    error = content["data"]["collectionAddProducts"]["errors"][0]
 
     assert (
         error["code"] == CollectionErrorCode.CANNOT_MANAGE_PRODUCT_WITHOUT_VARIANT.name
@@ -872,14 +1041,48 @@ def test_remove_products_from_collection(
     collection.products.add(*product_list)
     collection_id = to_global_id("Collection", collection.id)
     product_ids = [to_global_id("Product", product.pk) for product in product_list]
-    no_products_before = collection.products.count()
+    products_before = collection.products.count()
     variables = {"id": collection_id, "products": product_ids}
     response = staff_api_client.post_graphql(
         query, variables, permissions=[permission_manage_products]
     )
     content = get_graphql_content(response)
     data = content["data"]["collectionRemoveProducts"]["collection"]
-    assert data["products"]["totalCount"] == no_products_before - len(product_ids)
+    assert data["products"]["totalCount"] == products_before - len(product_ids)
+
+
+@patch("saleor.plugins.manager.PluginsManager.product_updated")
+def test_remove_products_from_collection_trigger_product_updated_webhook(
+    product_updated_mock,
+    staff_api_client,
+    collection,
+    product_list,
+    permission_manage_products,
+):
+    query = """
+        mutation collectionRemoveProducts(
+            $id: ID!, $products: [ID]!) {
+            collectionRemoveProducts(collectionId: $id, products: $products) {
+                collection {
+                    products {
+                        totalCount
+                    }
+                }
+            }
+        }
+    """
+    collection.products.add(*product_list)
+    collection_id = to_global_id("Collection", collection.id)
+    product_ids = [to_global_id("Product", product.pk) for product in product_list]
+    products_before = collection.products.count()
+    variables = {"id": collection_id, "products": product_ids}
+    response = staff_api_client.post_graphql(
+        query, variables, permissions=[permission_manage_products]
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["collectionRemoveProducts"]["collection"]
+    assert data["products"]["totalCount"] == products_before - len(product_ids)
+    assert len(product_list) == product_updated_mock.call_count
 
 
 NOT_EXISTS_IDS_COLLECTIONS_QUERY = """

@@ -7,6 +7,7 @@ from django.contrib.postgres.aggregates import StringAgg
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
+from django.db.models import JSONField  # type: ignore
 from django.db.models import (
     BooleanField,
     Case,
@@ -38,14 +39,16 @@ from ..channel.models import Channel
 from ..core.db.fields import SanitizedJSONField
 from ..core.models import ModelWithMetadata, PublishableModel, SortableModel
 from ..core.permissions import ProductPermissions, ProductTypePermissions
+from ..core.units import WeightUnits
 from ..core.utils import build_absolute_uri
 from ..core.utils.draftjs import json_content_to_raw_text
 from ..core.utils.editorjs import clean_editor_js
 from ..core.utils.translations import TranslationProxy
-from ..core.weight import WeightUnits, zero_weight
+from ..core.weight import zero_weight
 from ..discount import DiscountInfo
 from ..discount.utils import calculate_discounted_price
 from ..seo.models import SeoModel, SeoModelTranslation
+from . import ProductMediaTypes
 
 if TYPE_CHECKING:
     # flake8: noqa
@@ -56,12 +59,10 @@ if TYPE_CHECKING:
     from ..app.models import App
 
 
-class Category(MPTTModel, ModelWithMetadata, SeoModel):
+class Category(ModelWithMetadata, MPTTModel, SeoModel):
     name = models.CharField(max_length=250)
     slug = models.SlugField(max_length=255, unique=True, allow_unicode=True)
-    description = SanitizedJSONField(
-        blank=True, default=dict, sanitizer=clean_editor_js
-    )
+    description = SanitizedJSONField(blank=True, null=True, sanitizer=clean_editor_js)
     parent = models.ForeignKey(
         "self", null=True, blank=True, related_name="children", on_delete=models.CASCADE
     )
@@ -84,9 +85,7 @@ class CategoryTranslation(SeoModelTranslation):
         Category, related_name="translations", on_delete=models.CASCADE
     )
     name = models.CharField(max_length=128)
-    description = SanitizedJSONField(
-        blank=True, default=dict, sanitizer=clean_editor_js
-    )
+    description = SanitizedJSONField(blank=True, null=True, sanitizer=clean_editor_js)
 
     class Meta:
         unique_together = (("language_code", "category"),)
@@ -111,10 +110,12 @@ class ProductType(ModelWithMetadata):
     is_shipping_required = models.BooleanField(default=True)
     is_digital = models.BooleanField(default=False)
     weight = MeasurementField(
-        measurement=Weight, unit_choices=WeightUnits.CHOICES, default=zero_weight
+        measurement=Weight,
+        unit_choices=WeightUnits.CHOICES,  # type: ignore
+        default=zero_weight,
     )
 
-    class Meta:
+    class Meta(ModelWithMetadata.Meta):
         ordering = ("slug",)
         app_label = "product"
         permissions = (
@@ -159,7 +160,9 @@ class ProductsQueryset(models.QuerySet):
     def published_with_variants(self, channel_slug: str):
         published = self.published(channel_slug)
         query = ProductVariantChannelListing.objects.filter(
-            variant_id=OuterRef("variants__id"), channel__slug=str(channel_slug)
+            variant_id=OuterRef("variants__id"),
+            channel__slug=str(channel_slug),
+            price_amount__isnull=False,
         ).values_list("variant", flat=True)
         return published.filter(variants__in=query).distinct()
 
@@ -301,6 +304,22 @@ class ProductsQueryset(models.QuerySet):
             f"{ordering}name",
         )
 
+    def prefetched_for_webhook(self, single_object=True):
+        if single_object:
+            return self.prefetch_related(
+                "attributes__values",
+                "attributes__assignment__attribute",
+                "media",
+            )
+        return self.prefetch_related(
+            "attributes__values",
+            "attributes__assignment__attribute",
+            "collections",
+            "variants__stocks__allocations",
+            "media",
+            "category",
+        )
+
 
 class Product(SeoModel, ModelWithMetadata):
     product_type = models.ForeignKey(
@@ -308,10 +327,8 @@ class Product(SeoModel, ModelWithMetadata):
     )
     name = models.CharField(max_length=250)
     slug = models.SlugField(max_length=255, unique=True, allow_unicode=True)
-    description = SanitizedJSONField(
-        blank=True, default=dict, sanitizer=clean_editor_js
-    )
-    description_plaintext = TextField(blank=True, default="")
+    description = SanitizedJSONField(blank=True, null=True, sanitizer=clean_editor_js)
+    description_plaintext = TextField(blank=True)
     search_vector = SearchVectorField(null=True, blank=True)
 
     category = models.ForeignKey(
@@ -324,7 +341,10 @@ class Product(SeoModel, ModelWithMetadata):
     updated_at = models.DateTimeField(auto_now=True, null=True)
     charge_taxes = models.BooleanField(default=True)
     weight = MeasurementField(
-        measurement=Weight, unit_choices=WeightUnits.CHOICES, blank=True, null=True
+        measurement=Weight,
+        unit_choices=WeightUnits.CHOICES,  # type: ignore
+        blank=True,
+        null=True,
     )
     default_variant = models.OneToOneField(
         "ProductVariant",
@@ -345,6 +365,7 @@ class Product(SeoModel, ModelWithMetadata):
             (ProductPermissions.MANAGE_PRODUCTS.codename, "Manage products."),
         )
         indexes = [GinIndex(fields=["search_vector"])]
+        indexes.extend(ModelWithMetadata.Meta.indexes)
 
     def __iter__(self):
         if not hasattr(self, "__variants"):
@@ -368,7 +389,8 @@ class Product(SeoModel, ModelWithMetadata):
         return json_content_to_raw_text(self.description)
 
     def get_first_image(self):
-        images = list(self.images.all())
+        all_media = self.media.all()
+        images = [media for media in all_media if media.type == ProductMediaTypes.IMAGE]
         return images[0] if images else None
 
     @staticmethod
@@ -382,9 +404,7 @@ class ProductTranslation(SeoModelTranslation):
         Product, related_name="translations", on_delete=models.CASCADE
     )
     name = models.CharField(max_length=250)
-    description = SanitizedJSONField(
-        blank=True, default=dict, sanitizer=clean_editor_js
-    )
+    description = SanitizedJSONField(blank=True, null=True, sanitizer=clean_editor_js)
 
     class Meta:
         unique_together = (("language_code", "product"),)
@@ -409,6 +429,19 @@ class ProductVariantQueryset(models.QuerySet):
             quantity_allocated=Coalesce(
                 Sum("stocks__allocations__quantity_allocated"), 0
             ),
+        )
+
+    def available_in_channel(self, channel_slug):
+        return self.filter(
+            channel_listings__price_amount__isnull=False,
+            channel_listings__channel__slug=channel_slug,
+        )
+
+    def prefetched_for_webhook(self):
+        return self.prefetch_related(
+            "attributes__values",
+            "attributes__assignment__attribute",
+            "variant_media__media",
         )
 
 
@@ -457,17 +490,20 @@ class ProductVariant(SortableModel, ModelWithMetadata):
     product = models.ForeignKey(
         Product, related_name="variants", on_delete=models.CASCADE
     )
-    images = models.ManyToManyField("ProductImage", through="VariantImage")
+    media = models.ManyToManyField("ProductMedia", through="VariantMedia")
     track_inventory = models.BooleanField(default=True)
 
     weight = MeasurementField(
-        measurement=Weight, unit_choices=WeightUnits.CHOICES, blank=True, null=True
+        measurement=Weight,
+        unit_choices=WeightUnits.CHOICES,  # type: ignore
+        blank=True,
+        null=True,
     )
 
     objects = ProductVariantQueryset.as_manager()
     translated = TranslationProxy()
 
-    class Meta:
+    class Meta(ModelWithMetadata.Meta):
         ordering = ("sort_order", "sku")
         app_label = "product"
 
@@ -511,10 +547,6 @@ class ProductVariant(SortableModel, ModelWithMetadata):
             f"{product} ({variant_display})" if variant_display else str(product)
         )
         return smart_text(product_display)
-
-    def get_first_image(self) -> "ProductImage":
-        images = list(self.images.all())
-        return images[0] if images else self.product.get_first_image()
 
     def get_ordering_queryset(self):
         return self.product.variants.all()
@@ -564,6 +596,8 @@ class ProductVariantChannelListing(models.Model):
     price_amount = models.DecimalField(
         max_digits=settings.DEFAULT_MAX_DIGITS,
         decimal_places=settings.DEFAULT_DECIMAL_PLACES,
+        blank=True,
+        null=True,
     )
     price = MoneyField(amount_field="price_amount", currency_field="currency")
 
@@ -624,32 +658,39 @@ class DigitalContentUrl(models.Model):
         return build_absolute_uri(url)
 
 
-class ProductImage(SortableModel):
-    product = models.ForeignKey(
-        Product, related_name="images", on_delete=models.CASCADE
+class ProductMedia(SortableModel):
+    product = models.ForeignKey(Product, related_name="media", on_delete=models.CASCADE)
+    image = VersatileImageField(
+        upload_to="products", ppoi_field="ppoi", blank=True, null=True
     )
-    image = VersatileImageField(upload_to="products", ppoi_field="ppoi", blank=False)
     ppoi = PPOIField()
     alt = models.CharField(max_length=128, blank=True)
+    type = models.CharField(
+        max_length=32,
+        choices=ProductMediaTypes.CHOICES,
+        default=ProductMediaTypes.IMAGE,
+    )
+    external_url = models.CharField(max_length=256, blank=True, null=True)
+    oembed_data = JSONField(blank=True, default=dict)
 
     class Meta:
         ordering = ("sort_order", "pk")
         app_label = "product"
 
     def get_ordering_queryset(self):
-        return self.product.images.all()
+        return self.product.media.all()
 
 
-class VariantImage(models.Model):
+class VariantMedia(models.Model):
     variant = models.ForeignKey(
-        "ProductVariant", related_name="variant_images", on_delete=models.CASCADE
+        "ProductVariant", related_name="variant_media", on_delete=models.CASCADE
     )
-    image = models.ForeignKey(
-        ProductImage, related_name="variant_images", on_delete=models.CASCADE
+    media = models.ForeignKey(
+        ProductMedia, related_name="variant_media", on_delete=models.CASCADE
     )
 
     class Meta:
-        unique_together = ("variant", "image")
+        unique_together = ("variant", "media")
 
 
 class CollectionProduct(SortableModel):
@@ -700,15 +741,13 @@ class Collection(SeoModel, ModelWithMetadata):
         upload_to="collection-backgrounds", blank=True, null=True
     )
     background_image_alt = models.CharField(max_length=128, blank=True)
-    description = SanitizedJSONField(
-        blank=True, default=dict, sanitizer=clean_editor_js
-    )
+    description = SanitizedJSONField(blank=True, null=True, sanitizer=clean_editor_js)
 
     objects = CollectionsQueryset.as_manager()
 
     translated = TranslationProxy()
 
-    class Meta:
+    class Meta(ModelWithMetadata.Meta):
         ordering = ("slug",)
 
     def __str__(self) -> str:
@@ -742,9 +781,7 @@ class CollectionTranslation(SeoModelTranslation):
         Collection, related_name="translations", on_delete=models.CASCADE
     )
     name = models.CharField(max_length=128)
-    description = SanitizedJSONField(
-        blank=True, default=dict, sanitizer=clean_editor_js
-    )
+    description = SanitizedJSONField(blank=True, null=True, sanitizer=clean_editor_js)
 
     class Meta:
         unique_together = (("language_code", "collection"),)

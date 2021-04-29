@@ -5,6 +5,7 @@ import graphene
 from freezegun import freeze_time
 
 from ....product.error_codes import ProductErrorCode
+from ....product.models import ProductVariant, ProductVariantChannelListing
 from ....product.utils.costs import get_product_costs_data
 from ...tests.utils import assert_no_permission, get_graphql_content
 
@@ -14,11 +15,12 @@ mutation UpdateProductChannelListing(
     $input: ProductChannelListingUpdateInput!
 ) {
     productChannelListingUpdate(id: $id, input: $input) {
-        productChannelListingErrors {
+        errors {
             field
             message
             code
             channels
+            variants
         }
         product {
             slug
@@ -44,6 +46,13 @@ mutation UpdateProductChannelListing(
                 isAvailableForPurchase
                 availableForPurchase
             }
+            variants {
+                channelListings {
+                    channel {
+                        slug
+                    }
+                }
+            }
         }
     }
 }
@@ -59,7 +68,7 @@ def test_product_channel_listing_update_duplicated_ids_in_add_and_remove(
     variables = {
         "id": product_id,
         "input": {
-            "addChannels": [{"channelId": channel_id, "isPublished": True}],
+            "updateChannels": [{"channelId": channel_id, "isPublished": True}],
             "removeChannels": [channel_id],
         },
     }
@@ -73,9 +82,7 @@ def test_product_channel_listing_update_duplicated_ids_in_add_and_remove(
     content = get_graphql_content(response)
 
     # then
-    errors = content["data"]["productChannelListingUpdate"][
-        "productChannelListingErrors"
-    ]
+    errors = content["data"]["productChannelListingUpdate"]["errors"]
     assert len(errors) == 1
     assert errors[0]["field"] == "input"
     assert errors[0]["code"] == ProductErrorCode.DUPLICATED_INPUT_ITEM.name
@@ -91,7 +98,7 @@ def test_product_channel_listing_update_duplicated_channel_in_add(
     variables = {
         "id": product_id,
         "input": {
-            "addChannels": [
+            "updateChannels": [
                 {"channelId": channel_id, "isPublished": True},
                 {"channelId": channel_id, "isPublished": False},
             ],
@@ -107,11 +114,9 @@ def test_product_channel_listing_update_duplicated_channel_in_add(
     content = get_graphql_content(response)
 
     # then
-    errors = content["data"]["productChannelListingUpdate"][
-        "productChannelListingErrors"
-    ]
+    errors = content["data"]["productChannelListingUpdate"]["errors"]
     assert len(errors) == 1
-    assert errors[0]["field"] == "addChannels"
+    assert errors[0]["field"] == "updateChannels"
     assert errors[0]["code"] == ProductErrorCode.DUPLICATED_INPUT_ITEM.name
     assert errors[0]["channels"] == [channel_id]
 
@@ -136,9 +141,7 @@ def test_product_channel_listing_update_duplicated_channel_in_remove(
     content = get_graphql_content(response)
 
     # then
-    errors = content["data"]["productChannelListingUpdate"][
-        "productChannelListingErrors"
-    ]
+    errors = content["data"]["productChannelListingUpdate"]["errors"]
     assert len(errors) == 1
     assert errors[0]["field"] == "removeChannels"
     assert errors[0]["code"] == ProductErrorCode.DUPLICATED_INPUT_ITEM.name
@@ -164,9 +167,7 @@ def test_product_channel_listing_update_with_empty_input(
     content = get_graphql_content(response)
 
     # then
-    errors = content["data"]["productChannelListingUpdate"][
-        "productChannelListingErrors"
-    ]
+    errors = content["data"]["productChannelListingUpdate"]["errors"]
     assert not errors
 
 
@@ -177,7 +178,7 @@ def test_product_channel_listing_update_with_empty_lists_in_input(
     product_id = graphene.Node.to_global_id("Product", product.pk)
     variables = {
         "id": product_id,
-        "input": {"addChannels": [], "removeChannels": []},
+        "input": {"updateChannels": [], "removeChannels": []},
     }
 
     # when
@@ -189,9 +190,7 @@ def test_product_channel_listing_update_with_empty_lists_in_input(
     content = get_graphql_content(response)
 
     # then
-    errors = content["data"]["productChannelListingUpdate"][
-        "productChannelListingErrors"
-    ]
+    errors = content["data"]["productChannelListingUpdate"]["errors"]
     assert not errors
 
 
@@ -206,7 +205,7 @@ def test_product_channel_listing_update_as_staff_user(
     variables = {
         "id": product_id,
         "input": {
-            "addChannels": [
+            "updateChannels": [
                 {
                     "channelId": channel_id,
                     "isPublished": False,
@@ -236,7 +235,7 @@ def test_product_channel_listing_update_as_staff_user(
     purchase_cost, margin = get_product_costs_data(
         variant_channel_listing, True, channel_USD.currency_code
     )
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert product_data["channelListings"][0]["isPublished"] is True
     assert product_data["channelListings"][0]["publicationDate"] is None
@@ -285,7 +284,7 @@ def test_product_channel_listing_update_trigger_webhook_product_updated(
     variables = {
         "id": product_id,
         "input": {
-            "addChannels": [
+            "updateChannels": [
                 {
                     "channelId": channel_id,
                     "isPublished": False,
@@ -321,7 +320,7 @@ def test_product_channel_listing_update_as_app(
     variables = {
         "id": product_id,
         "input": {
-            "addChannels": [
+            "updateChannels": [
                 {
                     "channelId": channel_id,
                     "isPublished": False,
@@ -345,7 +344,7 @@ def test_product_channel_listing_update_as_app(
     # then
     data = content["data"]["productChannelListingUpdate"]
     product_data = data["product"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert product_data["channelListings"][0]["isPublished"] is True
     assert product_data["channelListings"][0]["publicationDate"] is None
@@ -378,7 +377,7 @@ def test_product_channel_listing_update_as_customer(
     channel_id = graphene.Node.to_global_id("Channel", channel_PLN.id)
     variables = {
         "id": product_id,
-        "input": {"addChannels": [{"channelId": channel_id, "isPublished": False}]},
+        "input": {"updateChannels": [{"channelId": channel_id, "isPublished": False}]},
     }
 
     # when
@@ -396,7 +395,7 @@ def test_product_channel_listing_update_as_anonymous(api_client, product, channe
     channel_id = graphene.Node.to_global_id("Channel", channel_PLN.id)
     variables = {
         "id": product_id,
-        "input": {"addChannels": [{"channelId": channel_id, "isPublished": False}]},
+        "input": {"updateChannels": [{"channelId": channel_id, "isPublished": False}]},
     }
 
     # when
@@ -419,7 +418,7 @@ def test_product_channel_listing_update_add_channel(
     variables = {
         "id": product_id,
         "input": {
-            "addChannels": [
+            "updateChannels": [
                 {
                     "channelId": channel_id,
                     "isPublished": False,
@@ -443,7 +442,7 @@ def test_product_channel_listing_update_add_channel(
     # then
     data = content["data"]["productChannelListingUpdate"]
     product_data = data["product"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert product_data["channelListings"][0]["isPublished"] is True
     assert product_data["channelListings"][0]["publicationDate"] is None
@@ -471,7 +470,7 @@ def test_product_channel_listing_update_add_channel_without_publication_date(
     channel_id = graphene.Node.to_global_id("Channel", channel_PLN.id)
     variables = {
         "id": product_id,
-        "input": {"addChannels": [{"channelId": channel_id, "isPublished": True}]},
+        "input": {"updateChannels": [{"channelId": channel_id, "isPublished": True}]},
     }
 
     # when
@@ -485,7 +484,7 @@ def test_product_channel_listing_update_add_channel_without_publication_date(
     # then
     data = content["data"]["productChannelListingUpdate"]
     product_data = data["product"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert product_data["channelListings"][0]["isPublished"] is True
     assert product_data["channelListings"][0]["publicationDate"] is None
@@ -507,7 +506,7 @@ def test_product_channel_listing_update_unpublished(
     channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
     variables = {
         "id": product_id,
-        "input": {"addChannels": [{"channelId": channel_id, "isPublished": False}]},
+        "input": {"updateChannels": [{"channelId": channel_id, "isPublished": False}]},
     }
 
     # when
@@ -521,7 +520,7 @@ def test_product_channel_listing_update_unpublished(
     # then
     data = content["data"]["productChannelListingUpdate"]
     product_data = data["product"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert product_data["channelListings"][0]["isPublished"] is False
     assert (
@@ -547,7 +546,7 @@ def test_product_channel_listing_update_publish_without_publication_date(
     channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
     variables = {
         "id": product_id,
-        "input": {"addChannels": [{"channelId": channel_id, "isPublished": True}]},
+        "input": {"updateChannels": [{"channelId": channel_id, "isPublished": True}]},
     }
 
     # when
@@ -561,7 +560,7 @@ def test_product_channel_listing_update_publish_without_publication_date(
     # then
     data = content["data"]["productChannelListingUpdate"]
     product_data = data["product"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert product_data["channelListings"][0]["isPublished"] is True
     assert (
@@ -580,7 +579,9 @@ def test_product_channel_listing_update_remove_publication_date(
     channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
     variables = {
         "id": product_id,
-        "input": {"addChannels": [{"channelId": channel_id, "publicationDate": None}]},
+        "input": {
+            "updateChannels": [{"channelId": channel_id, "publicationDate": None}]
+        },
     }
 
     # when
@@ -594,7 +595,7 @@ def test_product_channel_listing_update_remove_publication_date(
     # then
     data = content["data"]["productChannelListingUpdate"]
     product_data = data["product"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert product_data["channelListings"][0]["isPublished"] is True
     assert product_data["channelListings"][0]["publicationDate"] is None
@@ -616,7 +617,7 @@ def test_product_channel_listing_update_visible_in_listings(
     variables = {
         "id": product_id,
         "input": {
-            "addChannels": [{"channelId": channel_id, "visibleInListings": False}]
+            "updateChannels": [{"channelId": channel_id, "visibleInListings": False}]
         },
     }
 
@@ -631,7 +632,7 @@ def test_product_channel_listing_update_visible_in_listings(
     # then
     data = content["data"]["productChannelListingUpdate"]
     product_data = data["product"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert product_data["channelListings"][0]["isPublished"] is True
     assert product_data["channelListings"][0]["publicationDate"] is None
@@ -654,7 +655,7 @@ def test_product_channel_listing_update_update_publication_data(
     variables = {
         "id": product_id,
         "input": {
-            "addChannels": [
+            "updateChannels": [
                 {
                     "channelId": channel_id,
                     "isPublished": False,
@@ -675,7 +676,7 @@ def test_product_channel_listing_update_update_publication_data(
     # then
     data = content["data"]["productChannelListingUpdate"]
     product_data = data["product"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert product_data["channelListings"][0]["isPublished"] is False
     assert (
@@ -700,7 +701,9 @@ def test_product_channel_listing_update_update_is_available_for_purchase_false(
     variables = {
         "id": product_id,
         "input": {
-            "addChannels": [{"channelId": channel_id, "isAvailableForPurchase": False}]
+            "updateChannels": [
+                {"channelId": channel_id, "isAvailableForPurchase": False}
+            ]
         },
     }
 
@@ -715,7 +718,7 @@ def test_product_channel_listing_update_update_is_available_for_purchase_false(
     # then
     data = content["data"]["productChannelListingUpdate"]
     product_data = data["product"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert product_data["channelListings"][0]["isPublished"] is True
     assert not product_data["channelListings"][0]["publicationDate"]
@@ -734,7 +737,9 @@ def test_product_channel_listing_update_update_is_available_for_purchase_without
     variables = {
         "id": product_id,
         "input": {
-            "addChannels": [{"channelId": channel_id, "isAvailableForPurchase": True}]
+            "updateChannels": [
+                {"channelId": channel_id, "isAvailableForPurchase": True}
+            ]
         },
     }
 
@@ -749,7 +754,7 @@ def test_product_channel_listing_update_update_is_available_for_purchase_without
     # then
     data = content["data"]["productChannelListingUpdate"]
     product_data = data["product"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert product_data["channelListings"][0]["isPublished"] is True
     assert not product_data["channelListings"][0]["publicationDate"]
@@ -772,7 +777,7 @@ def test_product_channel_listing_update_update_is_available_for_purchase_past_da
     variables = {
         "id": product_id,
         "input": {
-            "addChannels": [
+            "updateChannels": [
                 {
                     "channelId": channel_id,
                     "isAvailableForPurchase": True,
@@ -793,7 +798,7 @@ def test_product_channel_listing_update_update_is_available_for_purchase_past_da
     # then
     data = content["data"]["productChannelListingUpdate"]
     product_data = data["product"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert product_data["channelListings"][0]["isPublished"] is True
     assert not product_data["channelListings"][0]["publicationDate"]
@@ -816,7 +821,7 @@ def test_product_channel_listing_update_update_is_available_for_purchase_future_
     variables = {
         "id": product_id,
         "input": {
-            "addChannels": [
+            "updateChannels": [
                 {
                     "channelId": channel_id,
                     "isAvailableForPurchase": True,
@@ -837,7 +842,7 @@ def test_product_channel_listing_update_update_is_available_for_purchase_future_
     # then
     data = content["data"]["productChannelListingUpdate"]
     product_data = data["product"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert product_data["channelListings"][0]["isPublished"] is True
     assert not product_data["channelListings"][0]["publicationDate"]
@@ -860,7 +865,7 @@ def test_product_channel_listing_update_update_is_available_for_purchase_false_a
     variables = {
         "id": product_id,
         "input": {
-            "addChannels": [
+            "updateChannels": [
                 {
                     "channelId": channel_id,
                     "isAvailableForPurchase": False,
@@ -880,7 +885,7 @@ def test_product_channel_listing_update_update_is_available_for_purchase_false_a
 
     # then
     data = content["data"]["productChannelListingUpdate"]
-    errors = data["productChannelListingErrors"]
+    errors = data["errors"]
     assert errors[0]["field"] == "availableForPurchaseDate"
     assert errors[0]["code"] == ProductErrorCode.INVALID.name
     assert errors[0]["channels"] == [channel_id]
@@ -917,7 +922,7 @@ def test_product_channel_listing_update_remove_channel(
     # then
     data = content["data"]["productChannelListingUpdate"]
     product_data = data["product"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert len(product_data["channelListings"]) == 1
     assert product.channel_listings.get() == product_channel_listing_pln
@@ -946,7 +951,7 @@ def test_product_channel_listing_update_remove_not_assigned_channel(
     # then
     data = content["data"]["productChannelListingUpdate"]
     product_data = data["product"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert product_data["slug"] == product.slug
     assert product_data["channelListings"][0]["isPublished"] is True
     assert product_data["channelListings"][0]["publicationDate"] is None
@@ -966,7 +971,7 @@ def test_product_channel_listing_update_publish_product_without_category(
     variables = {
         "id": product_id,
         "input": {
-            "addChannels": [
+            "updateChannels": [
                 {"channelId": channel_usd_id, "isPublished": True},
                 {"channelId": channel_pln_id, "isPublished": False},
             ]
@@ -983,8 +988,265 @@ def test_product_channel_listing_update_publish_product_without_category(
 
     # then
     data = content["data"]["productChannelListingUpdate"]
-    errors = data["productChannelListingErrors"]
+    errors = data["errors"]
     assert errors[0]["field"] == "isPublished"
     assert errors[0]["code"] == ProductErrorCode.PRODUCT_WITHOUT_CATEGORY.name
     assert errors[0]["channels"] == [channel_usd_id]
     assert len(errors) == 1
+
+
+def test_product_channel_listing_add_variant_as_staff_user(
+    staff_api_client, product, permission_manage_products, channel_USD
+):
+    # given
+    product.variants.all().delete()
+    variant_1 = ProductVariant.objects.create(product=product, sku="321")
+    variant_2 = ProductVariant.objects.create(product=product, sku="333")
+    variant_1_id = graphene.Node.to_global_id("ProductVariant", variant_1.pk)
+    variant_2_id = graphene.Node.to_global_id("ProductVariant", variant_2.pk)
+    variants = [variant_1_id, variant_2_id]
+
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+    channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
+    variables = {
+        "id": product_id,
+        "input": {
+            "updateChannels": [{"channelId": channel_id, "addVariants": variants}]
+        },
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        PRODUCT_CHANNEL_LISTING_UPDATE_MUTATION,
+        variables=variables,
+        permissions=(permission_manage_products,),
+    )
+    content = get_graphql_content(response)
+
+    # then
+    data = content["data"]["productChannelListingUpdate"]
+    variant_data = data["product"]["variants"]
+
+    assert not data["errors"]
+    assert variant_data[0]["channelListings"][0]["channel"]["slug"] == channel_USD.slug
+    assert variant_data[1]["channelListings"][0]["channel"]["slug"] == channel_USD.slug
+
+
+def test_product_channel_listing_add_variant_as_app(
+    app_api_client, product, permission_manage_products, channel_USD
+):
+    # given
+    product.variants.all().delete()
+    variant_1 = ProductVariant.objects.create(product=product, sku="321")
+    variant_2 = ProductVariant.objects.create(product=product, sku="333")
+    variant_1_id = graphene.Node.to_global_id("ProductVariant", variant_1.pk)
+    variant_2_id = graphene.Node.to_global_id("ProductVariant", variant_2.pk)
+    variants = [variant_1_id, variant_2_id]
+
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+    channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
+    variables = {
+        "id": product_id,
+        "input": {
+            "updateChannels": [{"channelId": channel_id, "addVariants": variants}]
+        },
+    }
+
+    # when
+    response = app_api_client.post_graphql(
+        PRODUCT_CHANNEL_LISTING_UPDATE_MUTATION,
+        variables=variables,
+        permissions=(permission_manage_products,),
+    )
+    content = get_graphql_content(response)
+
+    # then
+    data = content["data"]["productChannelListingUpdate"]
+    variant_data = data["product"]["variants"]
+
+    assert not data["errors"]
+    assert variant_data[0]["channelListings"][0]["channel"]["slug"] == channel_USD.slug
+    assert variant_data[1]["channelListings"][0]["channel"]["slug"] == channel_USD.slug
+
+
+def test_product_channel_listing_remove_variant_as_staff_user(
+    staff_api_client, product, permission_manage_products, channel_USD, channel_PLN
+):
+    # given
+    variant = product.variants.first()
+    ProductVariantChannelListing.objects.create(channel=channel_PLN, variant=variant)
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.pk)
+
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+    channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
+    variables = {
+        "id": product_id,
+        "input": {
+            "updateChannels": [
+                {"channelId": channel_id, "removeVariants": [variant_id]}
+            ]
+        },
+    }
+
+    assert len(variant.channel_listings.all()) == 2
+    # when
+    response = staff_api_client.post_graphql(
+        PRODUCT_CHANNEL_LISTING_UPDATE_MUTATION,
+        variables=variables,
+        permissions=(permission_manage_products,),
+    )
+    content = get_graphql_content(response)
+
+    # then
+    data = content["data"]["productChannelListingUpdate"]
+    assert not data["errors"]
+
+    assert len(variant.channel_listings.all()) == 1
+
+
+def test_product_channel_listing_remove_variant_as_app(
+    app_api_client, product, permission_manage_products, channel_USD, channel_PLN
+):
+    # given
+    variant = product.variants.first()
+    ProductVariantChannelListing.objects.create(channel=channel_PLN, variant=variant)
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.pk)
+
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+    channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
+    variables = {
+        "id": product_id,
+        "input": {
+            "updateChannels": [
+                {"channelId": channel_id, "removeVariants": [variant_id]}
+            ]
+        },
+    }
+
+    assert len(variant.channel_listings.all()) == 2
+    # when
+    response = app_api_client.post_graphql(
+        PRODUCT_CHANNEL_LISTING_UPDATE_MUTATION,
+        variables=variables,
+        permissions=(permission_manage_products,),
+    )
+    content = get_graphql_content(response)
+
+    # then
+    data = content["data"]["productChannelListingUpdate"]
+    assert not data["errors"]
+
+    assert len(variant.channel_listings.all()) == 1
+
+
+def test_product_channel_listing_add_variant_duplicated_ids_in_add_and_remove(
+    staff_api_client, product, permission_manage_products, channel_USD, channel_PLN
+):
+    # given
+    variant = product.variants.first()
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.pk)
+    channel_id = graphene.Node.to_global_id("Channel", channel_PLN.id)
+    variants = [variant_id]
+    variables = {
+        "id": product_id,
+        "input": {
+            "updateChannels": [
+                {
+                    "channelId": channel_id,
+                    "isPublished": True,
+                    "addVariants": variants,
+                    "removeVariants": variants,
+                }
+            ],
+        },
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        PRODUCT_CHANNEL_LISTING_UPDATE_MUTATION,
+        variables=variables,
+        permissions=(permission_manage_products,),
+    )
+    content = get_graphql_content(response)
+
+    # then
+    errors = content["data"]["productChannelListingUpdate"]["errors"]
+    assert len(errors) == 1
+    assert errors[0]["field"] == "addVariants"
+    assert errors[0]["code"] == ProductErrorCode.DUPLICATED_INPUT_ITEM.name
+    assert errors[0]["variants"] == variants
+
+
+def test_product_channel_listing_add_variant_with_existing_channel_listing(
+    staff_api_client, product, permission_manage_products, channel_USD
+):
+    # given
+    variant = product.variants.first()
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.pk)
+    channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
+    variants = [variant_id]
+    variables = {
+        "id": product_id,
+        "input": {
+            "updateChannels": [
+                {
+                    "channelId": channel_id,
+                    "isPublished": True,
+                    "addVariants": variants,
+                }
+            ],
+        },
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        PRODUCT_CHANNEL_LISTING_UPDATE_MUTATION,
+        variables=variables,
+        permissions=(permission_manage_products,),
+    )
+    content = get_graphql_content(response)
+
+    # then
+    errors = content["data"]["productChannelListingUpdate"]["errors"]
+    assert len(errors) == 1
+    assert errors[0]["field"] == "addVariants"
+    assert errors[0]["code"] == ProductErrorCode.ALREADY_EXISTS.name
+
+
+def test_product_channel_listing_remove_last_variant_channel_listing(
+    staff_api_client, product, permission_manage_products, channel_USD
+):
+    # given
+    assert product.channel_listings.filter(channel=channel_USD).exists()
+    variant = product.variants.first()
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.pk)
+    channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
+    variants = [variant_id]
+    variables = {
+        "id": product_id,
+        "input": {
+            "updateChannels": [
+                {
+                    "channelId": channel_id,
+                    "isPublished": True,
+                    "removeVariants": variants,
+                }
+            ],
+        },
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        PRODUCT_CHANNEL_LISTING_UPDATE_MUTATION,
+        variables=variables,
+        permissions=(permission_manage_products,),
+    )
+    content = get_graphql_content(response)
+
+    # then
+    data = content["data"]["productChannelListingUpdate"]
+    assert not data["errors"]
+    assert not product.channel_listings.filter(channel=channel_USD).exists()

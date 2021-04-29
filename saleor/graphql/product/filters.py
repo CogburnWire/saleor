@@ -1,21 +1,30 @@
+import math
 from collections import defaultdict
 from typing import Dict, Iterable, List, Optional
 
 import django_filters
 import graphene
-from django.db.models import Exists, F, OuterRef, Q, Subquery, Sum
-from django.db.models.functions import Coalesce
-from graphene_django.filter import GlobalIDFilter, GlobalIDMultipleChoiceFilter
+from django.contrib.postgres.search import SearchQuery, SearchRank
+from django.db.models import Exists, F, FloatField, OuterRef, Q, Subquery, Sum
+from django.db.models.functions import Cast, Coalesce
+from graphene_django.filter import GlobalIDMultipleChoiceFilter
 
+from ...attribute import AttributeInputType
 from ...attribute.models import (
     AssignedProductAttribute,
     AssignedVariantAttribute,
     Attribute,
+    AttributeValue,
 )
 from ...product.models import Category, Collection, Product, ProductType, ProductVariant
 from ...warehouse.models import Stock
 from ..channel.filters import get_channel_slug_from_filter_data
-from ..core.filters import EnumFilter, ListObjectTypeFilter, ObjectTypeFilter
+from ..core.filters import (
+    EnumFilter,
+    ListObjectTypeFilter,
+    MetadataFilterBase,
+    ObjectTypeFilter,
+)
 from ..core.types import ChannelFilterInputObjectType, FilterInputObjectType
 from ..core.types.common import IntRangeInput, PriceRangeInput
 from ..utils import get_nodes, resolve_global_ids_to_primary_keys
@@ -28,10 +37,10 @@ from .enums import (
     StockAvailability,
 )
 
+T_PRODUCT_FILTER_QUERIES = Dict[int, Iterable[int]]
 
-def _clean_product_attributes_filter_input(
-    filter_value,
-) -> Dict[int, List[Optional[int]]]:
+
+def _clean_product_attributes_filter_input(filter_value, queries):
     attributes = Attribute.objects.prefetch_related("values")
     attributes_map: Dict[str, int] = {
         attribute.slug: attribute.pk for attribute in attributes
@@ -40,7 +49,7 @@ def _clean_product_attributes_filter_input(
         attr.slug: {value.slug: value.pk for value in attr.values.all()}
         for attr in attributes
     }
-    queries: Dict[int, List[Optional[int]]] = defaultdict(list)
+
     # Convert attribute:value pairs into a dictionary where
     # attributes are keys and values are grouped in lists
     for attr_name, val_slugs in filter_value:
@@ -54,10 +63,34 @@ def _clean_product_attributes_filter_input(
         ]
         queries[attr_pk] += attr_val_pk
 
-    return queries
 
+def _clean_product_attributes_range_filter_input(filter_value, queries):
+    values = (
+        AttributeValue.objects.filter(attribute__input_type=AttributeInputType.NUMERIC)
+        .annotate(numeric_value=Cast("name", FloatField()))
+        .select_related("attribute")
+    )
 
-T_PRODUCT_FILTER_QUERIES = Dict[int, Iterable[int]]
+    attributes_map: Dict[str, int] = {}
+    values_map: Dict[str, Dict[str, int]] = defaultdict(dict)
+    for value_data in values.values_list(
+        "attribute_id", "attribute__slug", "pk", "numeric_value"
+    ):
+        attr_pk, attr_slug, pk, numeric_value = value_data
+        attributes_map[attr_slug] = attr_pk
+        values_map[attr_slug][numeric_value] = pk
+
+    for attr_name, val_range in filter_value:
+        if attr_name not in attributes_map:
+            raise ValueError("Unknown numeric attribute name: %r" % (attr_name,))
+        gte, lte = val_range.get("gte", 0), val_range.get("lte", math.inf)
+        attr_pk = attributes_map[attr_name]
+        attr_values = values_map[attr_name]
+        matching_values = [
+            value for value in attr_values.keys() if gte <= value and lte >= value
+        ]
+        attr_val_pks = [attr_values[value] for value in matching_values]
+        queries[attr_pk] += attr_val_pks
 
 
 def filter_products_by_attributes_values(qs, queries: T_PRODUCT_FILTER_QUERIES):
@@ -79,24 +112,32 @@ def filter_products_by_attributes_values(qs, queries: T_PRODUCT_FILTER_QUERIES):
         )
         for values in queries.values()
     ]
-
     return qs.filter(*filters)
 
 
-def filter_products_by_attributes(qs, filter_value):
-    queries = _clean_product_attributes_filter_input(filter_value)
+def filter_products_by_attributes(qs, filter_values, filter_range_values):
+    queries: Dict[int, List[Optional[int]]] = defaultdict(list)
+    try:
+        if filter_values:
+            _clean_product_attributes_filter_input(filter_values, queries)
+        if filter_range_values:
+            _clean_product_attributes_range_filter_input(filter_range_values, queries)
+    except ValueError:
+        return Product.objects.none()
     return filter_products_by_attributes_values(qs, queries)
 
 
 def filter_products_by_variant_price(qs, channel_slug, price_lte=None, price_gte=None):
     if price_lte:
         qs = qs.filter(
-            variants__channel_listings__price_amount__lte=price_lte,
+            Q(variants__channel_listings__price_amount__lte=price_lte)
+            | Q(variants__channel_listings__price_amount__isnull=True),
             variants__channel_listings__channel__slug=channel_slug,
         )
     if price_gte:
         qs = qs.filter(
-            variants__channel_listings__price_amount__gte=price_gte,
+            Q(variants__channel_listings__price_amount__gte=price_gte)
+            | Q(variants__channel_listings__price_amount__isnull=True),
             variants__channel_listings__channel__slug=channel_slug,
         )
     return qs
@@ -108,11 +149,13 @@ def filter_products_by_minimal_price(
     if minimal_price_lte:
         qs = qs.filter(
             channel_listings__discounted_price_amount__lte=minimal_price_lte,
+            channel_listings__discounted_price_amount__isnull=False,
             channel_listings__channel__slug=channel_slug,
         )
     if minimal_price_gte:
         qs = qs.filter(
             channel_listings__discounted_price_amount__gte=minimal_price_gte,
+            channel_listings__discounted_price_amount__isnull=False,
             channel_listings__channel__slug=channel_slug,
         )
     return qs
@@ -130,16 +173,19 @@ def filter_products_by_collections(qs, collections):
     return qs.filter(collections__in=collections)
 
 
-def filter_products_by_stock_availability(qs, stock_availability):
+def filter_products_by_stock_availability(qs, stock_availability, channel_slug):
     total_stock = (
-        Stock.objects.select_related("product_variant")
+        Stock.objects.for_channel(channel_slug)
+        .select_related("product_variant")
         .values("product_variant__product_id")
         .annotate(
             total_quantity_allocated=Coalesce(Sum("allocations__quantity_allocated"), 0)
         )
         .annotate(total_quantity=Coalesce(Sum("quantity"), 0))
         .annotate(total_available=F("total_quantity") - F("total_quantity_allocated"))
-        .filter(total_available__lte=0)
+        .filter(
+            total_available__lte=0,
+        )
         .values_list("product_variant__product_id", flat=True)
     )
     if stock_availability == StockAvailability.IN_STOCK:
@@ -149,14 +195,17 @@ def filter_products_by_stock_availability(qs, stock_availability):
     return qs
 
 
-def filter_attributes(qs, _, value):
+def _filter_attributes(qs, _, value):
     if value:
         value_list = []
+        value_range_list = []
         for v in value:
             slug = v["slug"]
-            values = [v["value"]] if "value" in v else v.get("values", [])
-            value_list.append((slug, values))
-        qs = filter_products_by_attributes(qs, value_list)
+            if "values" in v:
+                value_list.append((slug, v["values"]))
+            elif "values_range" in v:
+                value_range_list.append((slug, v["values_range"]))
+        qs = filter_products_by_attributes(qs, value_list, value_range_list)
     return qs
 
 
@@ -202,9 +251,9 @@ def _filter_minimal_price(qs, _, value, channel_slug):
     return qs
 
 
-def filter_stock_availability(qs, _, value):
+def _filter_stock_availability(qs, _, value, channel_slug):
     if value:
-        qs = filter_products_by_stock_availability(qs, value)
+        qs = filter_products_by_stock_availability(qs, value, channel_slug)
     return qs
 
 
@@ -217,14 +266,21 @@ def product_search(phrase):
         phrase (str): searched phrase
 
     """
-    ft_in_description_or_name = Q(search_vector=phrase)
+    query = SearchQuery(phrase, config="english")
+    vector = F("search_vector")
+    ft_in_description_or_name = Q(search_vector=query)
+
     ft_by_sku = Q(variants__sku__search=phrase)
-    return Product.objects.filter((ft_in_description_or_name | ft_by_sku))
+    return (
+        Product.objects.annotate(rank=SearchRank(vector, query))
+        .filter((ft_in_description_or_name | ft_by_sku))
+        .order_by("-rank")
+    )
 
 
 def filter_search(qs, _, value):
     if value:
-        qs = qs.distinct() & product_search(value).distinct()
+        qs = product_search(value).distinct() & qs.distinct()
     return qs
 
 
@@ -302,7 +358,7 @@ class ProductStockFilterInput(graphene.InputObjectType):
     quantity = graphene.Field(IntRangeInput, required=False)
 
 
-class ProductFilter(django_filters.FilterSet):
+class ProductFilter(MetadataFilterBase):
     is_published = django_filters.BooleanFilter(method="filter_is_published")
     collections = GlobalIDMultipleChoiceFilter(method=filter_collections)
     categories = GlobalIDMultipleChoiceFilter(method=filter_categories)
@@ -315,12 +371,11 @@ class ProductFilter(django_filters.FilterSet):
     )
     attributes = ListObjectTypeFilter(
         input_class="saleor.graphql.attribute.types.AttributeInput",
-        method=filter_attributes,
+        method="filter_attributes",
     )
     stock_availability = EnumFilter(
-        input_class=StockAvailability, method=filter_stock_availability
+        input_class=StockAvailability, method="filter_stock_availability"
     )
-    product_type = GlobalIDFilter()  # Deprecated
     product_types = GlobalIDMultipleChoiceFilter(field_name="product_type")
     stocks = ObjectTypeFilter(input_class=ProductStockFilterInput, method=filter_stocks)
     search = django_filters.CharFilter(method=filter_search)
@@ -335,10 +390,12 @@ class ProductFilter(django_filters.FilterSet):
             "has_category",
             "attributes",
             "stock_availability",
-            "product_type",
             "stocks",
             "search",
         ]
+
+    def filter_attributes(self, queryset, name, value):
+        return _filter_attributes(queryset, name, value)
 
     def filter_variant_price(self, queryset, name, value):
         channel_slug = get_channel_slug_from_filter_data(self.data)
@@ -352,8 +409,12 @@ class ProductFilter(django_filters.FilterSet):
         channel_slug = get_channel_slug_from_filter_data(self.data)
         return _filter_is_published(queryset, name, value, channel_slug)
 
+    def filter_stock_availability(self, queryset, name, value):
+        channel_slug = get_channel_slug_from_filter_data(self.data)
+        return _filter_stock_availability(queryset, name, value, channel_slug)
 
-class ProductVariantFilter(django_filters.FilterSet):
+
+class ProductVariantFilter(MetadataFilterBase):
     search = django_filters.CharFilter(
         method=filter_fields_containing_value("name", "product__name", "sku")
     )
@@ -364,7 +425,7 @@ class ProductVariantFilter(django_filters.FilterSet):
         fields = ["search", "sku"]
 
 
-class CollectionFilter(django_filters.FilterSet):
+class CollectionFilter(MetadataFilterBase):
     published = EnumFilter(
         input_class=CollectionPublished, method="filter_is_published"
     )
@@ -386,7 +447,7 @@ class CollectionFilter(django_filters.FilterSet):
         return queryset
 
 
-class CategoryFilter(django_filters.FilterSet):
+class CategoryFilter(MetadataFilterBase):
     search = django_filters.CharFilter(
         method=filter_fields_containing_value("slug", "name", "description")
     )
@@ -397,7 +458,7 @@ class CategoryFilter(django_filters.FilterSet):
         fields = ["search"]
 
 
-class ProductTypeFilter(django_filters.FilterSet):
+class ProductTypeFilter(MetadataFilterBase):
     search = django_filters.CharFilter(
         method=filter_fields_containing_value("name", "slug")
     )

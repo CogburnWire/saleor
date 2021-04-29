@@ -1,5 +1,5 @@
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import graphene
 from prices import Money, TaxedMoney
@@ -50,7 +50,7 @@ mutation OrderFulfillmentReturnProducts(
             id
             status
         }
-        orderErrors {
+        errors {
             field
             code
             message
@@ -75,7 +75,7 @@ def test_fulfillment_return_products_order_without_payment(
     content = get_graphql_content(response)
     data = content["data"]["orderFulfillmentReturnProducts"]
     fulfillment = data["returnFulfillment"]
-    errors = data["orderErrors"]
+    errors = data["errors"]
     assert len(errors) == 1
     assert errors[0]["field"] == "order"
     assert errors[0]["code"] == OrderErrorCode.CANNOT_REFUND.name
@@ -108,7 +108,7 @@ def test_fulfillment_return_products_amount_and_shipping_costs(
     staff_api_client.post_graphql(ORDER_FULFILL_RETURN_MUTATION, variables)
 
     mocked_refund.assert_called_with(
-        payment_dummy, quantize_price(amount_to_refund, fulfilled_order.currency)
+        payment_dummy, ANY, quantize_price(amount_to_refund, fulfilled_order.currency)
     )
 
 
@@ -188,7 +188,7 @@ def test_fulfillment_return_products_order_lines(
     return_fulfillment = data["returnFulfillment"]
     replace_fulfillment = data["replaceFulfillment"]
     replace_order = data["replaceOrder"]
-    errors = data["orderErrors"]
+    errors = data["errors"]
 
     assert not errors
     assert (
@@ -215,7 +215,7 @@ def test_fulfillment_return_products_order_lines(
 
     amount = line_to_return.unit_price_gross_amount * line_quantity_to_return
     amount += order_with_lines.shipping_price_gross_amount
-    mocked_refund.assert_called_with(payment_dummy, amount)
+    mocked_refund.assert_called_with(payment_dummy, ANY, amount)
 
 
 def test_fulfillment_return_products_order_lines_quantity_bigger_than_total(
@@ -240,7 +240,7 @@ def test_fulfillment_return_products_order_lines_quantity_bigger_than_total(
     content = get_graphql_content(response)
     data = content["data"]["orderFulfillmentReturnProducts"]
     return_fulfillment = data["returnFulfillment"]
-    errors = data["orderErrors"]
+    errors = data["errors"]
 
     assert len(errors) == 1
     assert errors[0]["field"] == "orderLineId"
@@ -271,7 +271,7 @@ def test_fulfillment_return_products_order_lines_quantity_bigger_than_unfulfille
     content = get_graphql_content(response)
     data = content["data"]["orderFulfillmentReturnProducts"]
     return_fulfillment = data["returnFulfillment"]
-    errors = data["orderErrors"]
+    errors = data["errors"]
 
     assert len(errors) == 1
     assert errors[0]["field"] == "orderLineId"
@@ -309,7 +309,7 @@ def test_fulfillment_return_products_order_lines_custom_amount(
     content = get_graphql_content(response)
     data = content["data"]["orderFulfillmentReturnProducts"]
     return_fulfillment = data["returnFulfillment"]
-    errors = data["orderErrors"]
+    errors = data["errors"]
     assert not errors
     assert (
         return_fulfillment["status"] == FulfillmentStatus.REFUNDED_AND_RETURNED.upper()
@@ -317,7 +317,7 @@ def test_fulfillment_return_products_order_lines_custom_amount(
     assert len(return_fulfillment["lines"]) == 1
     assert return_fulfillment["lines"][0]["orderLine"]["id"] == line_id
     assert return_fulfillment["lines"][0]["quantity"] == 2
-    mocked_refund.assert_called_with(payment_dummy, amount_to_refund)
+    mocked_refund.assert_called_with(payment_dummy, ANY, amount_to_refund)
 
 
 @patch("saleor.order.actions.gateway.refund")
@@ -401,7 +401,7 @@ def test_fulfillment_return_products_fulfillment_lines(
 
     content = get_graphql_content(response)
     data = content["data"]["orderFulfillmentReturnProducts"]
-    errors = data["orderErrors"]
+    errors = data["errors"]
     return_fulfillment = data["returnFulfillment"]
     replace_fulfillment = data["replaceFulfillment"]
     replace_order = data["replaceOrder"]
@@ -434,7 +434,7 @@ def test_fulfillment_return_products_fulfillment_lines(
         * quantity_to_return
     )
     amount += fulfilled_order.shipping_price_gross_amount
-    mocked_refund.assert_called_with(payment_dummy, amount)
+    mocked_refund.assert_called_with(payment_dummy, ANY, amount)
 
 
 def test_fulfillment_return_products_fulfillment_lines_quantity_bigger_than_total(
@@ -465,7 +465,7 @@ def test_fulfillment_return_products_fulfillment_lines_quantity_bigger_than_tota
     data = content["data"]["orderFulfillmentReturnProducts"]
     return_fulfillment = data["returnFulfillment"]
 
-    errors = data["orderErrors"]
+    errors = data["errors"]
     assert len(errors) == 1
     assert errors[0]["field"] == "fulfillmentLineId"
     assert errors[0]["code"] == OrderErrorCode.INVALID_QUANTITY.name
@@ -501,7 +501,7 @@ def test_fulfillment_return_products_amount_bigger_than_captured_amount(
     data = content["data"]["orderFulfillmentReturnProducts"]
     return_fulfillment = data["returnFulfillment"]
 
-    errors = data["orderErrors"]
+    errors = data["errors"]
     assert len(errors) == 1
     assert errors[0]["field"] == "amountToRefund"
     assert errors[0]["code"] == OrderErrorCode.CANNOT_REFUND.name
@@ -540,7 +540,7 @@ def test_fulfillment_return_products_lines_with_incorrect_status(
     data = content["data"]["orderFulfillmentReturnProducts"]
     return_fulfillment = data["returnFulfillment"]
 
-    errors = data["orderErrors"]
+    errors = data["errors"]
     assert len(errors) == 1
     assert errors[0]["field"] == "amountToRefund"
     assert errors[0]["code"] == OrderErrorCode.CANNOT_REFUND.name
@@ -583,7 +583,7 @@ def test_fulfillment_return_products_fulfillment_lines_include_shipping_costs(
     content = get_graphql_content(response)
     data = content["data"]["orderFulfillmentReturnProducts"]
     return_fulfillment = data["returnFulfillment"]
-    errors = data["orderErrors"]
+    errors = data["errors"]
 
     assert not errors
     assert (
@@ -594,7 +594,7 @@ def test_fulfillment_return_products_fulfillment_lines_include_shipping_costs(
     assert return_fulfillment["lines"][0]["quantity"] == 2
     amount = fulfillment_line_to_return.order_line.unit_price_gross_amount * 2
     amount += fulfilled_order.shipping_price_gross_amount
-    mocked_refund.assert_called_with(payment_dummy, amount)
+    mocked_refund.assert_called_with(payment_dummy, ANY, amount)
 
 
 @patch("saleor.order.actions.gateway.refund")
@@ -665,7 +665,7 @@ def test_fulfillment_return_products_fulfillment_lines_and_order_lines(
 
     content = get_graphql_content(response)
     data = content["data"]["orderFulfillmentReturnProducts"]
-    errors = data["orderErrors"]
+    errors = data["errors"]
     return_fulfillment = data["returnFulfillment"]
     replace_fulfillment = data["replaceFulfillment"]
     replace_order = data["replaceOrder"]
@@ -695,4 +695,4 @@ def test_fulfillment_return_products_fulfillment_lines_and_order_lines(
 
     amount = order_line.unit_price_gross_amount * 2
     amount = quantize_price(amount, fulfilled_order.currency)
-    mocked_refund.assert_called_with(payment_dummy, amount)
+    mocked_refund.assert_called_with(payment_dummy, ANY, amount)

@@ -1,5 +1,6 @@
 import graphene
 from django.core.exceptions import ValidationError
+from django.db import transaction
 
 from ...attribute import models as attribute_models
 from ...core.permissions import SitePermissions
@@ -9,15 +10,18 @@ from ...page import models as page_models
 from ...product import models as product_models
 from ...shipping import models as shipping_models
 from ..channel import ChannelContext
+from ..core.enums import LanguageCodeEnum
 from ..core.mutations import BaseMutation, ModelMutation, registry
 from ..core.types.common import TranslationError
-from ..core.utils import from_global_id_strict_type
+from ..core.utils import from_global_id_or_error
 from ..product.types import Product, ProductVariant
 from ..shop.types import Shop
-from .enums import LanguageCodeEnum
 
-# discount types need to be imported to get Voucher in the graphene registry
+# discount and menu types need to be imported to get
+# Voucher and Menu in the graphene registry
 from ..discount import types  # noqa # pylint: disable=unused-import, isort:skip
+
+from ..menu import types  # type: ignore # noqa # pylint: disable=unused-import, isort:skip
 
 
 class BaseTranslateMutation(ModelMutation):
@@ -43,6 +47,10 @@ class NameTranslationInput(graphene.InputObjectType):
     name = graphene.String()
 
 
+class AttributeValueTranslationInput(NameTranslationInput):
+    rich_text = graphene.JSONString()
+
+
 class SeoTranslationInput(graphene.InputObjectType):
     seo_title = graphene.String()
     seo_description = graphene.String()
@@ -50,6 +58,12 @@ class SeoTranslationInput(graphene.InputObjectType):
 
 class TranslationInput(NameTranslationInput, SeoTranslationInput):
     description = graphene.JSONString()
+
+
+class ShippingPriceTranslationInput(NameTranslationInput):
+    description = graphene.JSONString(
+        description="Translated shipping method description (JSON)."
+    )
 
 
 class CategoryTranslate(BaseTranslateMutation):
@@ -90,7 +104,7 @@ class ProductTranslate(BaseTranslateMutation):
                 {"id": ValidationError("This field is required", code="required")}
             )
 
-        product_pk = from_global_id_strict_type(data["id"], Product, field="id")
+        _type, product_pk = from_global_id_or_error(data["id"], only_type=Product)
         product = product_models.Product.objects.get(pk=product_pk)
         product.translations.update_or_create(
             language_code=data["language_code"], defaults=data["input"]
@@ -137,18 +151,28 @@ class ProductVariantTranslate(BaseTranslateMutation):
         permissions = (SitePermissions.MANAGE_TRANSLATIONS,)
 
     @classmethod
+    @transaction.atomic()
     def perform_mutation(cls, _root, info, **data):
         if "id" in data and not data["id"]:
             raise ValidationError(
                 {"id": ValidationError("This field is required", code="required")}
             )
 
-        variant_pk = from_global_id_strict_type(data["id"], ProductVariant, field="id")
-        variant = product_models.ProductVariant.objects.get(pk=variant_pk)
+        _type, variant_pk = from_global_id_or_error(
+            data["id"], only_type=ProductVariant
+        )
+        variant = product_models.ProductVariant.objects.prefetched_for_webhook().get(
+            pk=variant_pk
+        )
         variant.translations.update_or_create(
             language_code=data["language_code"], defaults=data["input"]
         )
         variant = ChannelContext(node=variant, channel_slug=None)
+
+        transaction.on_commit(
+            lambda: info.context.plugins.product_variant_updated(variant)
+        )
+
         return cls(**{cls._meta.return_field_name: variant})
 
 
@@ -174,7 +198,7 @@ class AttributeValueTranslate(BaseTranslateMutation):
         language_code = graphene.Argument(
             LanguageCodeEnum, required=True, description="Translation language code."
         )
-        input = NameTranslationInput(required=True)
+        input = AttributeValueTranslationInput(required=True)
 
     class Meta:
         description = "Creates/Updates translations for attribute value."
@@ -234,7 +258,7 @@ class ShippingPriceTranslate(BaseTranslateMutation):
         language_code = graphene.Argument(
             LanguageCodeEnum, required=True, description="Translation language code."
         )
-        input = NameTranslationInput(required=True)
+        input = ShippingPriceTranslationInput(required=True)
 
     class Meta:
         description = "Creates/Updates translations for shipping method."

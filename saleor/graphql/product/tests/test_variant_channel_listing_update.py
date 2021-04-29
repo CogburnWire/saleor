@@ -4,6 +4,7 @@ import graphene
 
 from ....product.error_codes import ProductErrorCode
 from ....product.models import ProductChannelListing
+from ....tests.utils import flush_post_commit_hooks
 from ...tests.utils import (
     assert_negative_positive_decimal_value,
     assert_no_permission,
@@ -16,7 +17,7 @@ mutation UpdateProductVariantChannelListing(
     $input: [ProductVariantChannelListingAddInput!]!
 ) {
     productVariantChannelListingUpdate(id: $id, input: $input) {
-        productChannelListingErrors {
+        errors {
             field
             message
             code
@@ -70,9 +71,7 @@ def test_variant_channel_listing_update_duplicated_channel(
     content = get_graphql_content(response)
 
     # then
-    errors = content["data"]["productVariantChannelListingUpdate"][
-        "productChannelListingErrors"
-    ]
+    errors = content["data"]["productVariantChannelListingUpdate"]["errors"]
     assert len(errors) == 1
     assert errors[0]["field"] == "channelId"
     assert errors[0]["code"] == ProductErrorCode.DUPLICATED_INPUT_ITEM.name
@@ -99,9 +98,7 @@ def test_variant_channel_listing_update_with_empty_input(
     content = get_graphql_content(response)
 
     # then
-    errors = content["data"]["productVariantChannelListingUpdate"][
-        "productChannelListingErrors"
-    ]
+    errors = content["data"]["productVariantChannelListingUpdate"]["errors"]
     assert not errors
 
 
@@ -126,9 +123,7 @@ def test_variant_channel_listing_update_not_assigned_channel(
     content = get_graphql_content(response)
 
     # then
-    errors = content["data"]["productVariantChannelListingUpdate"][
-        "productChannelListingErrors"
-    ]
+    errors = content["data"]["productVariantChannelListingUpdate"]["errors"]
     assert len(errors) == 1
     assert errors[0]["field"] == "input"
     assert errors[0]["code"] == ProductErrorCode.PRODUCT_NOT_ASSIGNED_TO_CHANNEL.name
@@ -178,9 +173,7 @@ def test_variant_channel_listing_update_with_too_many_decimal_places_in_price(
     content = get_graphql_content(response)
 
     # then
-    error = content["data"]["productVariantChannelListingUpdate"][
-        "productChannelListingErrors"
-    ][0]
+    error = content["data"]["productVariantChannelListingUpdate"]["errors"][0]
     assert error["field"] == "price"
     assert error["code"] == ProductErrorCode.INVALID.name
 
@@ -223,7 +216,7 @@ def test_variant_channel_listing_update_as_staff_user(
     # then
     data = content["data"]["productVariantChannelListingUpdate"]
     variant_data = data["variant"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert variant_data["id"] == variant_id
     assert variant_data["channelListings"][0]["price"]["currency"] == "USD"
     assert variant_data["channelListings"][0]["price"]["amount"] == price
@@ -235,9 +228,9 @@ def test_variant_channel_listing_update_as_staff_user(
     assert variant_data["channelListings"][1]["channel"]["slug"] == channel_PLN.slug
 
 
-@patch("saleor.plugins.manager.PluginsManager.product_updated")
-def test_variant_channel_listing_update_trigger_webhook_product_updated(
-    mock_product_updated,
+@patch("saleor.plugins.manager.PluginsManager.product_variant_updated")
+def test_variant_channel_listing_update_trigger_webhook_product_variant_updated(
+    mock_product_variant_updated,
     staff_api_client,
     product,
     permission_manage_products,
@@ -275,9 +268,10 @@ def test_variant_channel_listing_update_trigger_webhook_product_updated(
         permissions=(permission_manage_products,),
     )
     get_graphql_content(response)
+    flush_post_commit_hooks()
 
     # then
-    mock_product_updated.assert_called_once_with(product)
+    mock_product_variant_updated.assert_called_once_with(product.variants.last())
 
 
 def test_variant_channel_listing_update_as_app(
@@ -312,7 +306,7 @@ def test_variant_channel_listing_update_as_app(
     # then
     data = content["data"]["productVariantChannelListingUpdate"]
     variant_data = data["variant"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert variant_data["id"] == variant_id
     assert variant_data["channelListings"][0]["price"]["currency"] == "USD"
     assert variant_data["channelListings"][0]["price"]["amount"] == 1
@@ -408,7 +402,7 @@ def test_product_variant_channel_listing_update_updates_discounted_price(
 
     content = get_graphql_content(response)
     data = content["data"]["productVariantChannelListingUpdate"]
-    assert data["productChannelListingErrors"] == []
+    assert data["errors"] == []
 
     mock_update_product_discounted_price_task.delay.assert_called_once_with(product.pk)
 
@@ -438,7 +432,7 @@ def test_product_variant_channel_listing_update_remove_cost_price(
     # then
     data = content["data"]["productVariantChannelListingUpdate"]
     variant_data = data["variant"]
-    assert not data["productChannelListingErrors"]
+    assert not data["errors"]
     assert variant_data["id"] == variant_id
     assert variant_data["channelListings"][0]["price"]["currency"] == "USD"
     assert variant_data["channelListings"][0]["price"]["amount"] == 1
@@ -468,10 +462,8 @@ def test_product_channel_listing_update_too_many_decimal_places_in_cost_price(
 
     # then
     data = content["data"]["productVariantChannelListingUpdate"]
-    assert data["productChannelListingErrors"][0]["field"] == "costPrice"
-    assert (
-        data["productChannelListingErrors"][0]["code"] == ProductErrorCode.INVALID.name
-    )
+    assert data["errors"][0]["field"] == "costPrice"
+    assert data["errors"][0]["code"] == ProductErrorCode.INVALID.name
 
 
 def test_product_channel_listing_update_invalid_cost_price(

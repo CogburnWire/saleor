@@ -1,11 +1,12 @@
 import json
-from typing import Iterable, Optional
+from typing import TYPE_CHECKING, Iterable, Optional
 
 import graphene
 from django.db.models import QuerySet
 
 from ..account.models import User
 from ..checkout.models import Checkout
+from ..core.utils import build_absolute_uri
 from ..core.utils.anonymization import (
     anonymize_checkout,
     anonymize_order,
@@ -17,11 +18,20 @@ from ..order.models import Fulfillment, FulfillmentLine, Order, OrderLine
 from ..order.utils import get_order_country
 from ..page.models import Page
 from ..payment import ChargeStatus
+from ..product import ProductMediaTypes
 from ..product.models import Product
 from ..warehouse.models import Warehouse
 from .event_types import WebhookEventType
 from .payload_serializers import PayloadSerializer
-from .serializers import serialize_checkout_lines
+from .serializers import (
+    serialize_checkout_lines,
+    serialize_product_or_variant_attributes,
+)
+
+if TYPE_CHECKING:
+    # pylint: disable=unused-import
+    from ..product.models import ProductVariant
+
 
 ADDRESS_FIELDS = (
     "first_name",
@@ -49,9 +59,6 @@ ORDER_FIELDS = (
     "total_gross_amount",
     "shipping_price_net_amount",
     "shipping_price_gross_amount",
-    "discount_amount",
-    "discount_name",
-    "translated_discount_name",
     "weight",
     "private_metadata",
     "metadata",
@@ -69,6 +76,9 @@ def generate_order_lines_payload(lines: Iterable[OrderLine]):
         "currency",
         "unit_price_net_amount",
         "unit_price_gross_amount",
+        "unit_discount_amount",
+        "unit_discount_type",
+        "unit_discount_reason",
         "total_price_net_amount",
         "total_price_gross_amount",
         "tax_rate",
@@ -111,6 +121,15 @@ def generate_order_payload(order: "Order"):
         "billing_country_area",
     )
 
+    discount_fields = (
+        "type",
+        "value_type",
+        "value",
+        "amount_value",
+        "name",
+        "translated_name",
+        "reason",
+    )
     shipping_method_fields = ("name", "type", "currency", "price_amount")
     lines = order.lines.all()
     order_data = serializer.serialize(
@@ -122,6 +141,7 @@ def generate_order_payload(order: "Order"):
             "shipping_address": (lambda o: o.shipping_address, ADDRESS_FIELDS),
             "billing_address": (lambda o: o.billing_address, ADDRESS_FIELDS),
             "fulfillments": (lambda o: o.fulfillments.all(), fulfillment_fields),
+            "discounts": (lambda o: o.discounts.all(), discount_fields),
         },
         extra_dict_data={"lines": json.loads(generate_order_lines_payload(lines))},
     )
@@ -196,6 +216,10 @@ def generate_customer_payload(customer: "User"):
                 lambda c: c.default_shipping_address,
                 ADDRESS_FIELDS,
             ),
+            "addresses": (
+                lambda c: c.addresses.all(),
+                ADDRESS_FIELDS,
+            ),
         },
     )
     return data
@@ -205,7 +229,6 @@ PRODUCT_FIELDS = (
     "name",
     "description",
     "currency",
-    "attributes",
     "updated_at",
     "charge_taxes",
     "weight",
@@ -241,6 +264,20 @@ def generate_product_payload(product: "Product"):
                 product_variant_fields,
             ),
         },
+        extra_dict_data={
+            "attributes": serialize_product_or_variant_attributes(product),
+            "media": [
+                {
+                    "alt": media_obj.alt,
+                    "url": (
+                        build_absolute_uri(media_obj.image.url)
+                        if media_obj.type == ProductMediaTypes.IMAGE
+                        else media_obj.external_url
+                    ),
+                }
+                for media_obj in product.media.all()
+            ],
+        },
     )
     return product_payload
 
@@ -257,6 +294,49 @@ def generate_product_deleted_payload(product: "Product", variants_id):
         extra_dict_data={"variants": list(variant_global_ids)},
     )
     return product_payload
+
+
+PRODUCT_VARIANT_FIELDS = (
+    "name",
+    "sku",
+    "private_metadata",
+    "metadata",
+)
+
+
+def generate_product_variant_payload(product_variant: "ProductVariant"):
+    serializer = PayloadSerializer()
+    product_id = graphene.Node.to_global_id("Product", product_variant.product.id)
+    payload = serializer.serialize(
+        [product_variant],
+        fields=PRODUCT_VARIANT_FIELDS,
+        additional_fields={
+            "channel_listings": (
+                lambda p: p.channel_listings.all(),
+                (
+                    "currency",
+                    "price_amount",
+                    "cost_price_amount",
+                ),
+            ),
+        },
+        extra_dict_data={
+            "attributes": serialize_product_or_variant_attributes(product_variant),
+            "product_id": product_id,
+            "media": [
+                {
+                    "alt": media_obj.media.alt,
+                    "url": (
+                        build_absolute_uri(media_obj.media.image.url)
+                        if media_obj.media.type == ProductMediaTypes.IMAGE
+                        else media_obj.media.external_url
+                    ),
+                }
+                for media_obj in product_variant.variant_media.all()
+            ],
+        },
+    )
+    return payload
 
 
 def generate_fulfillment_lines_payload(fulfillment: Fulfillment):
@@ -285,7 +365,8 @@ def generate_fulfillment_payload(fulfillment: Fulfillment):
 
     # fulfillment fields to serialize
     fulfillment_fields = ("status", "tracking_code", "order__user_email")
-    order_country = get_order_country(fulfillment.order)
+    order = fulfillment.order
+    order_country = get_order_country(order)
     fulfillment_line = fulfillment.lines.first()
     if fulfillment_line and fulfillment_line.stock:
         warehouse = fulfillment_line.stock.warehouse
@@ -361,7 +442,7 @@ def _generate_sample_order_payload(event_name):
 
 def generate_sample_payload(event_name: str) -> Optional[dict]:
     checkout_events = [
-        WebhookEventType.CHECKOUT_UPADTED,
+        WebhookEventType.CHECKOUT_UPDATED,
         WebhookEventType.CHECKOUT_CREATED,
     ]
     pages_events = [
@@ -369,7 +450,9 @@ def generate_sample_payload(event_name: str) -> Optional[dict]:
         WebhookEventType.PAGE_DELETED,
         WebhookEventType.PAGE_UPDATED,
     ]
-    if event_name == WebhookEventType.CUSTOMER_CREATED:
+    user_events = [WebhookEventType.CUSTOMER_CREATED, WebhookEventType.CUSTOMER_UPDATED]
+
+    if event_name in user_events:
         user = generate_fake_user()
         payload = generate_customer_payload(user)
     elif event_name == WebhookEventType.PRODUCT_CREATED:
