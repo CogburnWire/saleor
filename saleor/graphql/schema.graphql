@@ -34,6 +34,7 @@ type AccountError {
   field: String
   message: String
   code: AccountErrorCode!
+  addressType: AddressTypeEnum
 }
 
 enum AccountErrorCode {
@@ -67,6 +68,8 @@ enum AccountErrorCode {
   JWT_DECODE_ERROR
   JWT_MISSING_TOKEN
   JWT_INVALID_CSRF_TOKEN
+  CHANNEL_INACTIVE
+  MISSING_CHANNEL_SLUG
 }
 
 input AccountInput {
@@ -90,6 +93,7 @@ input AccountRegisterInput {
   redirectUrl: String
   languageCode: LanguageCodeEnum
   metadata: [MetadataInput!]
+  channel: String
 }
 
 type AccountRequestDeletion {
@@ -409,7 +413,7 @@ type Attribute implements Node & ObjectWithMetadata {
   slug: String
   type: AttributeTypeEnum
   unit: MeasurementUnitsEnum
-  values: [AttributeValue]
+  choices(sortBy: AttributeChoicesSortingInput, filter: AttributeValueFilterInput, before: String, after: String, first: Int, last: Int): AttributeValueCountableConnection
   valueRequired: Boolean!
   visibleInStorefront: Boolean!
   filterableInStorefront: Boolean!
@@ -423,6 +427,16 @@ type AttributeBulkDelete {
   count: Int!
   attributeErrors: [AttributeError!]! @deprecated(reason: "Use errors field instead. This field will be removed in Saleor 4.0.")
   errors: [AttributeError!]!
+}
+
+enum AttributeChoicesSortField {
+  NAME
+  SLUG
+}
+
+input AttributeChoicesSortingInput {
+  direction: OrderDirection!
+  field: AttributeChoicesSortField!
 }
 
 type AttributeCountableConnection {
@@ -492,7 +506,7 @@ input AttributeFilterInput {
   filterableInStorefront: Boolean
   filterableInDashboard: Boolean
   availableInGrid: Boolean
-  metadata: [MetadataInput]
+  metadata: [MetadataFilter]
   search: String
   ids: [ID]
   type: AttributeTypeEnum
@@ -505,6 +519,7 @@ input AttributeInput {
   slug: String!
   values: [String]
   valuesRange: IntRangeInput
+  boolean: Boolean
 }
 
 enum AttributeInputTypeEnum {
@@ -514,6 +529,7 @@ enum AttributeInputTypeEnum {
   REFERENCE
   NUMERIC
   RICH_TEXT
+  BOOLEAN
 }
 
 type AttributeReorderValues {
@@ -594,12 +610,24 @@ type AttributeValue implements Node {
   reference: ID
   file: File
   richText: JSONString
+  boolean: Boolean
 }
 
 type AttributeValueBulkDelete {
   count: Int!
   attributeErrors: [AttributeError!]! @deprecated(reason: "Use errors field instead. This field will be removed in Saleor 4.0.")
   errors: [AttributeError!]!
+}
+
+type AttributeValueCountableConnection {
+  pageInfo: PageInfo!
+  edges: [AttributeValueCountableEdge!]!
+  totalCount: Int
+}
+
+type AttributeValueCountableEdge {
+  node: AttributeValue!
+  cursor: String!
 }
 
 type AttributeValueCreate {
@@ -622,6 +650,10 @@ type AttributeValueDelete {
   attributeValue: AttributeValue
 }
 
+input AttributeValueFilterInput {
+  search: String
+}
+
 input AttributeValueInput {
   id: ID
   values: [String]
@@ -629,6 +661,7 @@ input AttributeValueInput {
   contentType: String
   references: [ID!]
   richText: JSONString
+  boolean: Boolean
 }
 
 type AttributeValueTranslatableContent implements Node {
@@ -695,9 +728,9 @@ input CatalogueInput {
 }
 
 type Category implements Node & ObjectWithMetadata {
+  id: ID!
   seoTitle: String
   seoDescription: String
-  id: ID!
   name: String!
   description: JSONString
   slug: String!
@@ -744,7 +777,7 @@ type CategoryDelete {
 
 input CategoryFilterInput {
   search: String
-  metadata: [MetadataInput]
+  metadata: [MetadataFilter]
   ids: [ID]
 }
 
@@ -770,9 +803,9 @@ input CategorySortingInput {
 }
 
 type CategoryTranslatableContent implements Node {
+  id: ID!
   seoTitle: String
   seoDescription: String
-  id: ID!
   name: String!
   description: JSONString
   descriptionJson: JSONString @deprecated(reason: "Will be removed in Saleor 4.0. Use the `description` field instead.")
@@ -787,10 +820,10 @@ type CategoryTranslate {
 }
 
 type CategoryTranslation implements Node {
+  id: ID!
   seoTitle: String
   seoDescription: String
-  id: ID!
-  name: String!
+  name: String
   description: JSONString
   language: LanguageDisplay!
   descriptionJson: JSONString @deprecated(reason: "Will be removed in Saleor 4.0. Use the `description` field instead.")
@@ -809,7 +842,6 @@ type Channel implements Node {
   slug: String!
   currencyCode: String!
   hasOrders: Boolean!
-  shippingZones: [ShippingZone!]!
 }
 
 type ChannelActivate {
@@ -845,7 +877,7 @@ type ChannelDelete {
 }
 
 input ChannelDeleteInput {
-  targetChannel: ID!
+  channelId: ID!
 }
 
 type ChannelError {
@@ -862,7 +894,6 @@ enum ChannelErrorCode {
   NOT_FOUND
   REQUIRED
   UNIQUE
-  CHANNEL_TARGET_ID_MUST_BE_DIFFERENT
   CHANNELS_CURRENCY_MUST_BE_THE_SAME
   CHANNEL_WITH_ORDERS
   DUPLICATED_INPUT_ITEM
@@ -886,7 +917,6 @@ type Checkout implements Node & ObjectWithMetadata {
   created: DateTime!
   lastChange: DateTime!
   user: User
-  quantity: Int!
   channel: Channel!
   billingAddress: Address
   shippingAddress: Address
@@ -903,6 +933,7 @@ type Checkout implements Node & ObjectWithMetadata {
   availablePaymentGateways: [PaymentGateway!]!
   email: String!
   isShippingRequired: Boolean!
+  quantity: Int!
   lines: [CheckoutLine]
   shippingPrice: TaxedMoney
   shippingMethod: ShippingMethod
@@ -982,6 +1013,7 @@ type CheckoutError {
   message: String
   code: CheckoutErrorCode!
   variants: [ID!]
+  addressType: AddressTypeEnum
 }
 
 enum CheckoutErrorCode {
@@ -1089,9 +1121,9 @@ type ChoiceValue {
 }
 
 type Collection implements Node & ObjectWithMetadata {
+  id: ID!
   seoTitle: String
   seoDescription: String
-  id: ID!
   name: String!
   description: JSONString
   slug: String!
@@ -1117,9 +1149,9 @@ type CollectionBulkDelete {
 }
 
 type CollectionChannelListing implements Node {
+  id: ID!
   publicationDate: Date
   isPublished: Boolean!
-  id: ID!
   channel: Channel!
 }
 
@@ -1198,7 +1230,7 @@ enum CollectionErrorCode {
 input CollectionFilterInput {
   published: CollectionPublished
   search: String
-  metadata: [MetadataInput]
+  metadata: [MetadataFilter]
   ids: [ID]
   channel: String
 }
@@ -1245,9 +1277,9 @@ input CollectionSortingInput {
 }
 
 type CollectionTranslatableContent implements Node {
+  id: ID!
   seoTitle: String
   seoDescription: String
-  id: ID!
   name: String!
   description: JSONString
   descriptionJson: JSONString @deprecated(reason: "Will be removed in Saleor 4.0. Use the `description` field instead.")
@@ -1262,10 +1294,10 @@ type CollectionTranslate {
 }
 
 type CollectionTranslation implements Node {
+  id: ID!
   seoTitle: String
   seoDescription: String
-  id: ID!
-  name: String!
+  name: String
   description: JSONString
   language: LanguageDisplay!
   descriptionJson: JSONString @deprecated(reason: "Will be removed in Saleor 4.0. Use the `description` field instead.")
@@ -1297,6 +1329,7 @@ enum ConfigurationTypeFieldEnum {
   SECRET
   PASSWORD
   SECRETMULTILINE
+  OUTPUT
 }
 
 type ConfirmAccount {
@@ -1637,6 +1670,7 @@ input CustomerFilterInput {
   numberOfOrders: IntRangeInput
   placedOrders: DateRangeInput
   search: String
+  metadata: [MetadataFilter]
 }
 
 input CustomerInput {
@@ -1837,7 +1871,7 @@ input DraftOrderCreateInput {
   shippingMethod: ID
   voucher: ID
   customerNote: String
-  channel: ID
+  channelId: ID
   redirectUrl: String
   lines: [OrderLineCreateInput]
 }
@@ -1857,7 +1891,7 @@ input DraftOrderInput {
   shippingMethod: ID
   voucher: ID
   customerNote: String
-  channel: ID
+  channelId: ID
   redirectUrl: String
 }
 
@@ -1880,6 +1914,7 @@ type ExportError {
 }
 
 enum ExportErrorCode {
+  GRAPHQL_ERROR
   INVALID
   NOT_FOUND
   REQUIRED
@@ -2488,7 +2523,7 @@ enum MenuErrorCode {
 input MenuFilterInput {
   search: String
   slug: [String]
-  metadata: [MetadataInput]
+  metadata: [MetadataFilter]
 }
 
 input MenuInput {
@@ -2553,7 +2588,7 @@ type MenuItemDelete {
 
 input MenuItemFilterInput {
   search: String
-  metadata: [MetadataInput]
+  metadata: [MetadataFilter]
 }
 
 input MenuItemInput {
@@ -2637,6 +2672,11 @@ enum MetadataErrorCode {
   INVALID
   NOT_FOUND
   REQUIRED
+}
+
+input MetadataFilter {
+  key: String!
+  value: String
 }
 
 input MetadataInput {
@@ -2749,7 +2789,7 @@ type Mutation {
   paymentCapture(amount: PositiveDecimal, paymentId: ID!): PaymentCapture
   paymentRefund(amount: PositiveDecimal, paymentId: ID!): PaymentRefund
   paymentVoid(paymentId: ID!): PaymentVoid
-  paymentInitialize(gateway: String!, paymentData: JSONString): PaymentInitialize
+  paymentInitialize(channel: String, gateway: String!, paymentData: JSONString): PaymentInitialize
   pageCreate(input: PageCreateInput!): PageCreate
   pageDelete(id: ID!): PageDelete
   pageBulkDelete(ids: [ID]!): PageBulkDelete
@@ -2818,7 +2858,7 @@ type Mutation {
   giftCardCreate(input: GiftCardCreateInput!): GiftCardCreate
   giftCardDeactivate(id: ID!): GiftCardDeactivate
   giftCardUpdate(id: ID!, input: GiftCardUpdateInput!): GiftCardUpdate
-  pluginUpdate(id: ID!, input: PluginUpdateInput!): PluginUpdate
+  pluginUpdate(channelId: ID, id: ID!, input: PluginUpdateInput!): PluginUpdate
   saleCreate(input: SaleInput!): SaleCreate
   saleDelete(id: ID!): SaleDelete
   saleBulkDelete(ids: [ID]!): SaleBulkDelete
@@ -2837,21 +2877,21 @@ type Mutation {
   voucherChannelListingUpdate(id: ID!, input: VoucherChannelListingInput!): VoucherChannelListingUpdate
   exportProducts(input: ExportProductsInput!): ExportProducts
   fileUpload(file: Upload!): FileUpload
-  checkoutAddPromoCode(checkoutId: ID!, promoCode: String!): CheckoutAddPromoCode
-  checkoutBillingAddressUpdate(billingAddress: AddressInput!, checkoutId: ID!): CheckoutBillingAddressUpdate
-  checkoutComplete(checkoutId: ID!, paymentData: JSONString, redirectUrl: String, storeSource: Boolean = false): CheckoutComplete
+  checkoutAddPromoCode(checkoutId: ID, promoCode: String!, token: UUID): CheckoutAddPromoCode
+  checkoutBillingAddressUpdate(billingAddress: AddressInput!, checkoutId: ID, token: UUID): CheckoutBillingAddressUpdate
+  checkoutComplete(checkoutId: ID, paymentData: JSONString, redirectUrl: String, storeSource: Boolean = false, token: UUID): CheckoutComplete
   checkoutCreate(input: CheckoutCreateInput!): CheckoutCreate
-  checkoutCustomerAttach(checkoutId: ID!): CheckoutCustomerAttach
-  checkoutCustomerDetach(checkoutId: ID!): CheckoutCustomerDetach
-  checkoutEmailUpdate(checkoutId: ID, email: String!): CheckoutEmailUpdate
-  checkoutLineDelete(checkoutId: ID!, lineId: ID): CheckoutLineDelete
-  checkoutLinesAdd(checkoutId: ID!, lines: [CheckoutLineInput]!): CheckoutLinesAdd
-  checkoutLinesUpdate(checkoutId: ID!, lines: [CheckoutLineInput]!): CheckoutLinesUpdate
-  checkoutRemovePromoCode(checkoutId: ID!, promoCode: String!): CheckoutRemovePromoCode
-  checkoutPaymentCreate(checkoutId: ID!, input: PaymentInput!): CheckoutPaymentCreate
-  checkoutShippingAddressUpdate(checkoutId: ID!, shippingAddress: AddressInput!): CheckoutShippingAddressUpdate
-  checkoutShippingMethodUpdate(checkoutId: ID, shippingMethodId: ID!): CheckoutShippingMethodUpdate
-  checkoutLanguageCodeUpdate(checkoutId: ID!, languageCode: LanguageCodeEnum!): CheckoutLanguageCodeUpdate
+  checkoutCustomerAttach(checkoutId: ID, token: UUID): CheckoutCustomerAttach
+  checkoutCustomerDetach(checkoutId: ID, token: UUID): CheckoutCustomerDetach
+  checkoutEmailUpdate(checkoutId: ID, email: String!, token: UUID): CheckoutEmailUpdate
+  checkoutLineDelete(checkoutId: ID, lineId: ID, token: UUID): CheckoutLineDelete
+  checkoutLinesAdd(checkoutId: ID, lines: [CheckoutLineInput]!, token: UUID): CheckoutLinesAdd
+  checkoutLinesUpdate(checkoutId: ID, lines: [CheckoutLineInput]!, token: UUID): CheckoutLinesUpdate
+  checkoutRemovePromoCode(checkoutId: ID, promoCode: String!, token: UUID): CheckoutRemovePromoCode
+  checkoutPaymentCreate(checkoutId: ID, input: PaymentInput!, token: UUID): CheckoutPaymentCreate
+  checkoutShippingAddressUpdate(checkoutId: ID, shippingAddress: AddressInput!, token: UUID): CheckoutShippingAddressUpdate
+  checkoutShippingMethodUpdate(checkoutId: ID, shippingMethodId: ID!, token: UUID): CheckoutShippingMethodUpdate
+  checkoutLanguageCodeUpdate(checkoutId: ID, languageCode: LanguageCodeEnum!, token: UUID): CheckoutLanguageCodeUpdate
   channelCreate(input: ChannelCreateInput!): ChannelCreate
   channelUpdate(id: ID!, input: ChannelUpdateInput!): ChannelUpdate
   channelDelete(id: ID!, input: ChannelDeleteInput): ChannelDelete
@@ -2889,19 +2929,19 @@ type Mutation {
   externalRefresh(input: JSONString!, pluginId: String!): ExternalRefresh
   externalLogout(input: JSONString!, pluginId: String!): ExternalLogout
   externalVerify(input: JSONString!, pluginId: String!): ExternalVerify
-  requestPasswordReset(email: String!, redirectUrl: String!): RequestPasswordReset
+  requestPasswordReset(channel: String, email: String!, redirectUrl: String!): RequestPasswordReset
   confirmAccount(email: String!, token: String!): ConfirmAccount
   setPassword(email: String!, password: String!, token: String!): SetPassword
   passwordChange(newPassword: String!, oldPassword: String!): PasswordChange
-  requestEmailChange(newEmail: String!, password: String!, redirectUrl: String!): RequestEmailChange
-  confirmEmailChange(token: String!): ConfirmEmailChange
+  requestEmailChange(channel: String, newEmail: String!, password: String!, redirectUrl: String!): RequestEmailChange
+  confirmEmailChange(channel: String, token: String!): ConfirmEmailChange
   accountAddressCreate(input: AddressInput!, type: AddressTypeEnum): AccountAddressCreate
   accountAddressUpdate(id: ID!, input: AddressInput!): AccountAddressUpdate
   accountAddressDelete(id: ID!): AccountAddressDelete
   accountSetDefaultAddress(id: ID!, type: AddressTypeEnum!): AccountSetDefaultAddress
   accountRegister(input: AccountRegisterInput!): AccountRegister
   accountUpdate(input: AccountInput!): AccountUpdate
-  accountRequestDeletion(redirectUrl: String!): AccountRequestDeletion
+  accountRequestDeletion(channel: String, redirectUrl: String!): AccountRequestDeletion
   accountDelete(token: String!): AccountDelete
   addressCreate(input: AddressInput!, userId: ID!): AddressCreate
   addressUpdate(id: ID!, input: AddressInput!): AddressUpdate
@@ -2969,6 +3009,8 @@ type Order implements Node & ObjectWithMetadata {
   availableShippingMethods: [ShippingMethod]
   invoices: [Invoice]
   number: String
+  original: ID
+  origin: OrderOriginEnum!
   isPaid: Boolean!
   paymentStatus: PaymentChargeStatusEnum!
   paymentStatusDisplay: String!
@@ -2990,6 +3032,7 @@ type Order implements Node & ObjectWithMetadata {
   discountName: String @deprecated(reason: "Use discounts field. This field will be removed in Saleor 4.0.")
   translatedDiscountName: String @deprecated(reason: "Use discounts field. This field will be removed in Saleor 4.0.")
   discounts: [OrderDiscount!]
+  errors: [OrderError!]!
 }
 
 enum OrderAction {
@@ -3094,7 +3137,7 @@ input OrderDraftFilterInput {
   customer: String
   created: DateRangeInput
   search: String
-  metadata: [MetadataInput]
+  metadata: [MetadataFilter]
   channels: [ID]
 }
 
@@ -3103,8 +3146,9 @@ type OrderError {
   message: String
   code: OrderErrorCode!
   warehouse: ID
-  orderLine: ID
+  orderLines: [ID!]
   variants: [ID!]
+  addressType: AddressTypeEnum
 }
 
 enum OrderErrorCode {
@@ -3222,6 +3266,8 @@ enum OrderEventsEnum {
   ORDER_DISCOUNT_DELETED
   ORDER_LINE_DISCOUNT_UPDATED
   ORDER_LINE_DISCOUNT_REMOVED
+  ORDER_LINE_PRODUCT_DELETED
+  ORDER_LINE_VARIANT_DELETED
   UPDATED_ADDRESS
   EMAIL_SENT
   CONFIRMED
@@ -3252,7 +3298,7 @@ input OrderFilterInput {
   customer: String
   created: DateRangeInput
   search: String
-  metadata: [MetadataInput]
+  metadata: [MetadataFilter]
   channels: [ID]
 }
 
@@ -3350,6 +3396,12 @@ type OrderMarkAsPaid {
   order: Order
   orderErrors: [OrderError!]! @deprecated(reason: "Use errors field instead. This field will be removed in Saleor 4.0.")
   errors: [OrderError!]!
+}
+
+enum OrderOriginEnum {
+  CHECKOUT
+  DRAFT
+  REISSUE
 }
 
 type OrderRefund {
@@ -3482,9 +3534,9 @@ type OrderVoid {
 }
 
 type Page implements Node & ObjectWithMetadata {
+  id: ID!
   seoTitle: String
   seoDescription: String
-  id: ID!
   title: String!
   content: JSONString
   publicationDate: Date
@@ -3577,7 +3629,9 @@ enum PageErrorCode {
 
 input PageFilterInput {
   search: String
-  metadata: [MetadataInput]
+  metadata: [MetadataFilter]
+  pageTypes: [ID]
+  ids: [ID]
 }
 
 type PageInfo {
@@ -3617,9 +3671,9 @@ input PageSortingInput {
 }
 
 type PageTranslatableContent implements Node {
+  id: ID!
   seoTitle: String
   seoDescription: String
-  id: ID!
   title: String!
   content: JSONString
   contentJson: JSONString @deprecated(reason: "Will be removed in Saleor 4.0. Use the `content` field instead.")
@@ -3634,10 +3688,10 @@ type PageTranslate {
 }
 
 type PageTranslation implements Node {
+  id: ID!
   seoTitle: String
   seoDescription: String
-  id: ID!
-  title: String!
+  title: String
   content: JSONString
   language: LanguageDisplay!
   contentJson: JSONString @deprecated(reason: "Will be removed in Saleor 4.0. Use the `content` field instead.")
@@ -3809,6 +3863,7 @@ enum PaymentErrorCode {
   SHIPPING_METHOD_NOT_SET
   PAYMENT_ERROR
   NOT_SUPPORTED_GATEWAY
+  CHANNEL_INACTIVE
 }
 
 input PaymentFilterInput {
@@ -3875,6 +3930,7 @@ enum PermissionEnum {
   MANAGE_ORDERS
   MANAGE_PAGES
   MANAGE_PAGE_TYPES_AND_ATTRIBUTES
+  HANDLE_PAYMENTS
   MANAGE_PRODUCTS
   MANAGE_PRODUCT_TYPES_AND_ATTRIBUTES
   MANAGE_SHIPPING
@@ -3947,12 +4003,23 @@ input PermissionGroupUpdateInput {
   removeUsers: [ID!]
 }
 
-type Plugin implements Node {
+type Plugin {
   id: ID!
   name: String!
   description: String!
+  globalConfiguration: PluginConfiguration
+  channelConfigurations: [PluginConfiguration!]!
+}
+
+type PluginConfiguration {
   active: Boolean!
+  channel: Channel
   configuration: [ConfigurationItem]
+}
+
+enum PluginConfigurationType {
+  PER_CHANNEL
+  GLOBAL
 }
 
 type PluginCountableConnection {
@@ -3982,8 +4049,9 @@ enum PluginErrorCode {
 }
 
 input PluginFilterInput {
-  active: Boolean
+  statusInChannels: PluginStatusInChannelsInput
   search: String
+  type: PluginConfigurationType
 }
 
 enum PluginSortField {
@@ -3994,6 +4062,11 @@ enum PluginSortField {
 input PluginSortingInput {
   direction: OrderDirection!
   field: PluginSortField!
+}
+
+input PluginStatusInChannelsInput {
+  active: Boolean!
+  channels: [ID!]!
 }
 
 type PluginUpdate {
@@ -4042,7 +4115,7 @@ type Product implements Node & ObjectWithMetadata {
   taxType: TaxType
   attributes: [SelectedAttribute!]!
   channelListings: [ProductChannelListing!]
-  mediaById(id: ID): ProductMedia!
+  mediaById(id: ID): ProductMedia
   imageById(id: ID): ProductImage @deprecated(reason: "Will be removed in Saleor 4.0. Use the `mediaById` field instead.")
   variants: [ProductVariant]
   media: [ProductMedia!]
@@ -4216,7 +4289,7 @@ input ProductFilterInput {
   stockAvailability: StockAvailability
   stocks: ProductStockFilterInput
   search: String
-  metadata: [MetadataInput]
+  metadata: [MetadataFilter]
   price: PriceRangeInput
   minimalPrice: PriceRangeInput
   productTypes: [ID]
@@ -4365,7 +4438,7 @@ type ProductTranslation implements Node {
   id: ID!
   seoTitle: String
   seoDescription: String
-  name: String!
+  name: String
   description: JSONString
   language: LanguageDisplay!
   descriptionJson: JSONString @deprecated(reason: "Will be removed in Saleor 4.0. Use the `description` field instead.")
@@ -4431,7 +4504,7 @@ input ProductTypeFilterInput {
   search: String
   configurable: ProductTypeConfigurable
   productType: ProductTypeEnum
-  metadata: [MetadataInput]
+  metadata: [MetadataFilter]
   ids: [ID]
 }
 
@@ -4488,7 +4561,6 @@ type ProductVariant implements Node & ObjectWithMetadata {
   channelListings: [ProductVariantChannelListing!]
   pricing(address: AddressInput): VariantPricingInfo
   attributes(variantSelection: VariantAttributeScope): [SelectedAttribute!]!
-  costPrice: Money
   margin: Int
   quantityOrdered: Int
   revenue(period: ReportingPeriod): TaxedMoney
@@ -4577,7 +4649,7 @@ type ProductVariantDelete {
 input ProductVariantFilterInput {
   search: String
   sku: [String]
-  metadata: [MetadataInput]
+  metadata: [MetadataFilter]
 }
 
 input ProductVariantInput {
@@ -4733,7 +4805,7 @@ type Query {
 
 type ReducedRate {
   rate: Float!
-  rateType: TaxRateType!
+  rateType: String!
 }
 
 type RefreshToken {
@@ -5143,6 +5215,7 @@ type ShippingZoneDelete {
 
 input ShippingZoneFilterInput {
   search: String
+  channels: [ID]
 }
 
 type ShippingZoneUpdate {
@@ -5163,7 +5236,7 @@ input ShippingZoneUpdateInput {
 }
 
 type Shop {
-  availablePaymentGateways(currency: String): [PaymentGateway!]!
+  availablePaymentGateways(currency: String, channel: String): [PaymentGateway!]!
   availableExternalAuthentications: [ExternalAuthentication!]!
   availableShippingMethods(channel: String!, address: AddressInput): [ShippingMethod]
   countries(languageCode: LanguageCodeEnum): [CountryDisplay!]!
@@ -5304,6 +5377,7 @@ type StaffError {
   field: String
   message: String
   code: AccountErrorCode!
+  addressType: AddressTypeEnum
   permissions: [PermissionEnum!]
   groups: [ID!]
   users: [ID!]
@@ -5413,34 +5487,6 @@ input StockFilterInput {
 input StockInput {
   warehouse: ID!
   quantity: Int!
-}
-
-enum TaxRateType {
-  ACCOMMODATION
-  ADMISSION_TO_CULTURAL_EVENTS
-  ADMISSION_TO_ENTERTAINMENT_EVENTS
-  ADMISSION_TO_SPORTING_EVENTS
-  ADVERTISING
-  AGRICULTURAL_SUPPLIES
-  BABY_FOODSTUFFS
-  BIKES
-  BOOKS
-  CHILDRENS_CLOTHING
-  DOMESTIC_FUEL
-  DOMESTIC_SERVICES
-  E_BOOKS
-  FOODSTUFFS
-  HOTELS
-  MEDICAL
-  NEWSPAPERS
-  PASSENGER_TRANSPORT
-  PHARMACEUTICALS
-  PROPERTY_RENOVATIONS
-  RESTAURANTS
-  SOCIAL_HOUSING
-  STANDARD
-  WATER
-  WINE
 }
 
 type TaxType {
@@ -5586,7 +5632,7 @@ type User implements Node & ObjectWithMetadata {
   editableGroups: [Group]
   avatar(size: Int): Image
   events: [CustomerEvent]
-  storedPaymentSources: [PaymentSource]
+  storedPaymentSources(channel: String): [PaymentSource]
   languageCode: LanguageCodeEnum!
 }
 
@@ -5629,6 +5675,7 @@ input UserCreateInput {
   note: String
   languageCode: LanguageCodeEnum
   redirectUrl: String
+  channel: String
 }
 
 type UserPermission {
@@ -5719,6 +5766,7 @@ type Voucher implements Node {
   endDate: DateTime
   applyOncePerOrder: Boolean!
   applyOncePerCustomer: Boolean!
+  onlyForStaff: Boolean!
   discountValueType: DiscountValueTypeEnum!
   minCheckoutItemsQuantity: Int
   categories(before: String, after: String, first: Int, last: Int): CategoryCountableConnection
@@ -5820,6 +5868,7 @@ input VoucherInput {
   countries: [String]
   applyOncePerOrder: Boolean
   applyOncePerCustomer: Boolean
+  onlyForStaff: Boolean
   usageLimit: Int
 }
 
@@ -5880,23 +5929,12 @@ type Warehouse implements Node & ObjectWithMetadata {
   id: ID!
   name: String!
   slug: String!
-  companyName: String!
   shippingZones(before: String, after: String, first: Int, last: Int): ShippingZoneCountableConnection!
   address: Address!
   email: String!
   privateMetadata: [MetadataItem]!
   metadata: [MetadataItem]!
-}
-
-input WarehouseAddressInput {
-  streetAddress1: String!
-  streetAddress2: String
-  city: String!
-  cityArea: String
-  postalCode: String
-  country: CountryCode!
-  countryArea: String
-  phone: String
+  companyName: String! @deprecated(reason: "Use address.CompanyName. This field will be removed in Saleor 4.0.")
 }
 
 type WarehouseCountableConnection {
@@ -5918,10 +5956,9 @@ type WarehouseCreate {
 
 input WarehouseCreateInput {
   slug: String
-  companyName: String
   email: String
   name: String!
-  address: WarehouseAddressInput!
+  address: AddressInput!
   shippingZones: [ID]
 }
 
@@ -5980,10 +6017,9 @@ type WarehouseUpdate {
 
 input WarehouseUpdateInput {
   slug: String
-  companyName: String
   email: String
   name: String
-  address: WarehouseAddressInput
+  address: AddressInput
 }
 
 type Webhook implements Node {
@@ -6062,6 +6098,13 @@ enum WebhookEventTypeEnum {
   PAGE_CREATED
   PAGE_UPDATED
   PAGE_DELETED
+  PAYMENT_AUTHORIZE
+  PAYMENT_CAPTURE
+  PAYMENT_CONFIRM
+  PAYMENT_LIST_GATEWAYS
+  PAYMENT_PROCESS
+  PAYMENT_REFUND
+  PAYMENT_VOID
 }
 
 enum WebhookSampleEventTypeEnum {
@@ -6089,6 +6132,13 @@ enum WebhookSampleEventTypeEnum {
   PAGE_CREATED
   PAGE_UPDATED
   PAGE_DELETED
+  PAYMENT_AUTHORIZE
+  PAYMENT_CAPTURE
+  PAYMENT_CONFIRM
+  PAYMENT_LIST_GATEWAYS
+  PAYMENT_PROCESS
+  PAYMENT_REFUND
+  PAYMENT_VOID
 }
 
 type WebhookUpdate {

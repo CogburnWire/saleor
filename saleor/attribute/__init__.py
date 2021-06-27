@@ -10,6 +10,7 @@ class AttributeInputType:
     REFERENCE = "reference"
     NUMERIC = "numeric"
     RICH_TEXT = "rich-text"
+    BOOLEAN = "boolean"
 
     CHOICES = [
         (DROPDOWN, "Dropdown"),
@@ -18,9 +19,24 @@ class AttributeInputType:
         (REFERENCE, "Reference"),
         (NUMERIC, "Numeric"),
         (RICH_TEXT, "Rich Text"),
+        (BOOLEAN, "Boolean"),
     ]
+
     # list of the input types that can be used in variant selection
-    ALLOWED_IN_VARIANT_SELECTION = [DROPDOWN]
+    ALLOWED_IN_VARIANT_SELECTION = [DROPDOWN, BOOLEAN]
+
+    TYPES_WITH_CHOICES = [
+        DROPDOWN,
+        MULTISELECT,
+    ]
+
+    # list of the input types that are unique per instances
+    TYPES_WITH_UNIQUE_VALUES = [
+        FILE,
+        REFERENCE,
+        RICH_TEXT,
+        NUMERIC,
+    ]
 
 
 # list of input types that are allowed for given attribute property
@@ -29,20 +45,24 @@ ATTRIBUTE_PROPERTIES_CONFIGURATION = {
         AttributeInputType.DROPDOWN,
         AttributeInputType.MULTISELECT,
         AttributeInputType.NUMERIC,
+        AttributeInputType.BOOLEAN,
     ],
     "filterable_in_dashboard": [
         AttributeInputType.DROPDOWN,
         AttributeInputType.MULTISELECT,
         AttributeInputType.NUMERIC,
+        AttributeInputType.BOOLEAN,
     ],
     "available_in_grid": [
         AttributeInputType.DROPDOWN,
         AttributeInputType.MULTISELECT,
         AttributeInputType.NUMERIC,
+        AttributeInputType.BOOLEAN,
     ],
     "storefront_search_position": [
         AttributeInputType.DROPDOWN,
         AttributeInputType.MULTISELECT,
+        AttributeInputType.BOOLEAN,
     ],
 }
 
