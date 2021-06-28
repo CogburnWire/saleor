@@ -569,9 +569,8 @@ if REDIS_URL:
     CACHE_URL = os.environ.setdefault("CACHE_URL", REDIS_URL)
 CACHES = {"default": django_cache_url.config()}
 # heroku fix for redis ssl
-CACHES["default"]["OPTIONS"]["CONNECTION_POOL_KWARGS"] = {
-    "ssl_cert_reqs": None
-}
+if os.environ.get("DJANGO_ENV") == "prod":
+    CACHES["default"]["OPTIONS"]["CONNECTION_POOL_KWARGS"] = {"ssl_cert_reqs": None}
 
 # Default False because storefront and dashboard don't support expiration of token
 JWT_EXPIRE = get_bool_from_env("JWT_EXPIRE", False)
