@@ -2,4 +2,4 @@ from django.apps import AppConfig
 
 
 class SubblyConfig(AppConfig):
-    name = 'subbly'
+    name = "saleor.plugins.subbly"
