@@ -23,6 +23,8 @@ urlpatterns = [
         handle_plugin_webhook,
         name="plugins",
     ),
+    # subbly plugin urls
+    url(r"subbly/", include("saleor.plugins.subbly.urls"),),
 ]
 
 if settings.DEBUG:

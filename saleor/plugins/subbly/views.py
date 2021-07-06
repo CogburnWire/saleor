@@ -1,3 +1,6 @@
-from django.shortcuts import render
+from django.core.handlers.wsgi import WSGIRequest
+from django.http import JsonResponse
 
-# Create your views here.
+
+def subscription_created(request: WSGIRequest) -> JsonResponse:
+    return JsonResponse({"working": "yes"})
