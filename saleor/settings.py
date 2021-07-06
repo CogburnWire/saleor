@@ -230,6 +230,7 @@ INSTALLED_APPS = [
     "django.contrib.postgres",
     # Local apps
     "saleor.plugins",
+    "saleor.plugins.subbly",
     "saleor.account",
     "saleor.discount",
     "saleor.giftcard",
@@ -518,6 +519,7 @@ PLUGINS = [
     "saleor.payment.gateways.adyen.plugin.AdyenGatewayPlugin",
     "saleor.payment.gateways.authorize_net.plugin.AuthorizeNetGatewayPlugin",
     "saleor.plugins.invoicing.plugin.InvoicingPlugin",
+    "saleor.plugins.subbly.plugin.SubblyPlugin",
 ]
 
 # Plugin discovery

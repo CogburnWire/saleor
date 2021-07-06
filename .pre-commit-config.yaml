@@ -54,10 +54,10 @@ repos:
         files: "models\\.py$"
         stages: [commit]
 
-  - repo: local
-    hooks:
-      - id: gql-schema-check
-        language: system
-        name: Check for up-to-date GraphQL schema.
-        entry: sh -c "./manage.py get_graphql_schema | diff saleor/graphql/schema.graphql -"
-        stages: [commit]
+#  - repo: local
+#    hooks:
+#      - id: gql-schema-check
+#        language: system
+#        name: Check for up-to-date GraphQL schema.
+#        entry: sh -c "./manage.py get_graphql_schema | diff saleor/graphql/schema.graphql -"
+#        stages: [commit]
