@@ -3,4 +3,7 @@ from django.http import JsonResponse
 
 
 def subscription_created(request: WSGIRequest) -> JsonResponse:
-    return JsonResponse({"working": "yes"})
+    if request.method == "POST":
+        return JsonResponse({"working": "yes"})
+
+    return JsonResponse(status=405, data={})
