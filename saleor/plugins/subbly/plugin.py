@@ -1,17 +1,33 @@
-"""
-Subbly plugin
+from django.core.exceptions import ValidationError
 
-Handles incomming webhooks for subscription orders
+from saleor.plugins.base_plugin import BasePlugin, ConfigurationTypeField
 
-- Store user details
-- Send invite for the marketplace
-"""
-
-from saleor.plugins.base_plugin import BasePlugin
+from ..models import PluginConfiguration
 
 
 class SubblyPlugin(BasePlugin):
     PLUGIN_ID = "plugin.subbly"
     PLUGIN_NAME = "Subbly Integration"
     PLUGIN_DESCRIPTION = "Subscription box customer integration"
-    DEFAULT_ACTIVE = True
+
+    CONFIG_STRUCTURE = {
+        "secret": {
+            "type": ConfigurationTypeField.STRING,
+            "help_text": "Provide your subbly secret key",
+        },
+    }
+
+    DEFAULT_CONFIGURATION = [
+        {"name": "secret", "value": None},
+    ]
+
+    DEFAULT_ACTIVE = False
+
+    @classmethod
+    def validate_plugin_configuration(cls, plugin_configuration: "PluginConfiguration"):
+        """Validate if secret is provided."""
+        configuration = plugin_configuration.configuration
+        if not configuration["secret"]:
+            raise ValidationError(
+                "To enable this plugin, you need to provide a secret key"
+            )
