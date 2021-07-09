@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.conf.urls import include, url
 from django.conf.urls.static import static
+from django.contrib import admin
 from django.contrib.staticfiles.views import serve
 from django.views.decorators.csrf import csrf_exempt
 
@@ -23,7 +24,12 @@ urlpatterns = [
         handle_plugin_webhook,
         name="plugins",
     ),
+    # subbly plugin urls
+    url(r"subbly/", include("saleor.plugins.subbly.urls"),),
 ]
+
+# enable django admin
+urlpatterns += [url(r"^admin/", admin.site.urls)]
 
 if settings.DEBUG:
     import warnings

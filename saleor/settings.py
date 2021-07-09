@@ -46,6 +46,8 @@ ADMINS = (
 )
 MANAGERS = ADMINS
 
+ADMIN_URL = "admin/"
+
 _DEFAULT_CLIENT_HOSTS = "localhost,127.0.0.1"
 
 ALLOWED_CLIENT_HOSTS = os.environ.get("ALLOWED_CLIENT_HOSTS")
@@ -178,6 +180,11 @@ context_processors = [
     "django.template.context_processors.debug",
     "django.template.context_processors.media",
     "django.template.context_processors.static",
+    # django admin
+    "django.contrib.auth.context_processors.auth",
+    "django.contrib.messages.context_processors.messages",
+    "django.template.context_processors.request",
+    # end admin
     "saleor.site.context_processors.site",
 ]
 
@@ -209,6 +216,11 @@ if not SECRET_KEY and DEBUG:
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
+    # django admin
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    # end django admin
     "saleor.core.middleware.request_time",
     "saleor.core.middleware.discounts",
     "saleor.core.middleware.google_analytics",
@@ -224,12 +236,18 @@ INSTALLED_APPS = [
     "storages",
     # Django modules
     "django.contrib.contenttypes",
+    "django.contrib.sessions",
     "django.contrib.sites",
     "django.contrib.staticfiles",
     "django.contrib.auth",
     "django.contrib.postgres",
+    # Django admin
+    "django.contrib.messages",
+    "django.contrib.admin",
+    "django.forms",
     # Local apps
     "saleor.plugins",
+    "saleor.plugins.subbly",
     "saleor.account",
     "saleor.discount",
     "saleor.giftcard",
@@ -463,6 +481,8 @@ PLACEHOLDER_IMAGES = {
 DEFAULT_PLACEHOLDER = "images/placeholder255x255.png"
 
 AUTHENTICATION_BACKENDS = [
+    # Django admin
+    "django.contrib.auth.backends.ModelBackend",
     "saleor.core.auth_backend.JSONWebTokenBackend",
 ]
 
@@ -518,6 +538,7 @@ PLUGINS = [
     "saleor.payment.gateways.adyen.plugin.AdyenGatewayPlugin",
     "saleor.payment.gateways.authorize_net.plugin.AuthorizeNetGatewayPlugin",
     "saleor.plugins.invoicing.plugin.InvoicingPlugin",
+    "saleor.plugins.subbly.plugin.SubblyPlugin",
 ]
 
 # Plugin discovery
@@ -569,9 +590,8 @@ if REDIS_URL:
     CACHE_URL = os.environ.setdefault("CACHE_URL", REDIS_URL)
 CACHES = {"default": django_cache_url.config()}
 # heroku fix for redis ssl
-CACHES["default"]["OPTIONS"]["CONNECTION_POOL_KWARGS"] = {
-    "ssl_cert_reqs": None
-}
+if os.environ.get("DJANGO_ENV") == "prod":
+    CACHES["default"]["OPTIONS"]["CONNECTION_POOL_KWARGS"] = {"ssl_cert_reqs": None}
 
 # Default False because storefront and dashboard don't support expiration of token
 JWT_EXPIRE = get_bool_from_env("JWT_EXPIRE", False)
