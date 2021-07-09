@@ -8,6 +8,7 @@ def subscription_created(request: HttpRequest) -> JsonResponse:
     configuration = _get_config()
 
     print("Secret", configuration["secret"])
+    print("HEADERS", request.headers)
     if request.method == "POST":
         print(request.POST)
         return JsonResponse({"working": "yes"})
@@ -20,4 +21,5 @@ def _get_config() -> dict:
         identifier=SubblyPlugin.PLUGIN_ID
     )
 
-    return plugin_configuration.configuration
+    configuration = plugin_configuration.configuration
+    return {item["name"]: item["value"] for item in configuration}

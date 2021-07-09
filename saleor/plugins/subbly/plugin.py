@@ -27,6 +27,7 @@ class SubblyPlugin(BasePlugin):
     def validate_plugin_configuration(cls, plugin_configuration: "PluginConfiguration"):
         """Validate if secret is provided."""
         configuration = plugin_configuration.configuration
+        configuration = {item["name"]: item["value"] for item in configuration}
         if not configuration["secret"]:
             raise ValidationError(
                 "To enable this plugin, you need to provide a secret key"
