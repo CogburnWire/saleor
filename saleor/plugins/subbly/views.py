@@ -5,9 +5,8 @@ from .plugin import SubblyPlugin
 
 
 def subscription_created(request: HttpRequest) -> JsonResponse:
-    configuration = _get_config()
+    # configuration = _get_config()
 
-    print("Secret", configuration["secret"])
     print("HEADERS", request.headers)
     if request.method == "POST":
         print(request.POST)
@@ -22,4 +21,5 @@ def _get_config() -> dict:
     )
 
     configuration = plugin_configuration.configuration
+
     return {item["name"]: item["value"] for item in configuration}
