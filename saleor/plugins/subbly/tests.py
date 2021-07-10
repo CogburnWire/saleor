@@ -12,7 +12,11 @@ class SubblyPluginTestCase(TestCase):
         PluginConfiguration.objects.create(
             identifier="plugin.subbly",
             name="Subbly integration",
-            configuration={"secret": "test"},
+            configuration=[
+                {"name": "Secret", "value": "testsecret"},
+                {"name": "Test mode", "value": False},
+                {"name": "Bcc Addresses", "value": None},
+            ],
         )
 
     def test_creates_a_subscription_record(self):
@@ -22,8 +26,6 @@ class SubblyPluginTestCase(TestCase):
             content_type="application/json",
             data=webhook_payload,
         )
-        print(response)
-        self.assertTrue(False)
         self.assertEqual(response.status_code, 200)
 
     def test_only_allows_post_request(self):
