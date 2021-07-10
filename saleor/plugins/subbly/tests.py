@@ -19,8 +19,6 @@ class SubblyPluginTestCase(TestCase):
             ],
         )
 
-        # {"Secret": "test", "Bcc Addresses": None, "Test mode": False},
-
     def test_creates_a_subscription_record(self):
         c = Client()
         response: HttpResponse = c.post(
