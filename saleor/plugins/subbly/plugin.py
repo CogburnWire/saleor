@@ -11,14 +11,27 @@ class SubblyPlugin(BasePlugin):
     PLUGIN_DESCRIPTION = "Subscription box customer integration"
 
     CONFIG_STRUCTURE = {
-        "secret": {
+        "Secret": {
             "type": ConfigurationTypeField.STRING,
             "help_text": "Provide your subbly secret key",
+            "label": "Secret",
+        },
+        "Test mode": {
+            "type": ConfigurationTypeField.BOOLEAN,
+            "help_text": "Run plugin in test mode",
+            "label": "Test mode",
+        },
+        "Bcc Addresses": {
+            "type": ConfigurationTypeField.STRING,
+            "help_text": "BCC email addresses",
+            "label": "Bcc Address(es)",
         },
     }
 
     DEFAULT_CONFIGURATION = [
-        {"name": "secret", "value": None},
+        {"name": "Secret", "value": None},
+        {"name": "Test mode", "value": False},
+        {"name": "Bcc Addresses", "value": None},
     ]
 
     DEFAULT_ACTIVE = False
