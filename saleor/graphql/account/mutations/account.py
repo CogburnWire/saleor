@@ -66,10 +66,10 @@ class Onboarding(ModelMutation):
         except ValidationError as error:
             raise ValidationError({"password": error})
 
-        # invite code should be valid
+        # invite code should be valid and belongs to the subscriber's email
         invite_code = data["invite_code"]
         try:
-            SubblySubscription.objects.get(invite_code=invite_code)
+            SubblySubscription.objects.get(invite_code=invite_code, email=data["email"])
         except SubblySubscription.DoesNotExist:
             raise ValidationError({"invite_code": "Invalid invite code."})
 
