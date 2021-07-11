@@ -5,4 +5,4 @@ from .models import SubblySubscription
 
 @admin.register(SubblySubscription)
 class SubblySubscriptionAdmin(admin.ModelAdmin):
-    fields = ("id", "email", "subscription_id")
+    list_display = ("pk", "email", "subscription_id", "invite_code", "created")
