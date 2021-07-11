@@ -10,7 +10,6 @@ from .plugin import SubblyPlugin
 def subscription_created(request: HttpRequest) -> JsonResponse:
     # configuration = _get_config()
 
-    print("HEADERS", request.headers)
     if request.method == "POST":
         payload = json.loads(request.body.decode("utf-8"))
         customer = payload.get("customer").get("user", {})

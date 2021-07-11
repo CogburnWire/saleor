@@ -2844,6 +2844,7 @@ type Mutation {
   accountUpdate(input: AccountInput!): AccountUpdate
   accountRequestDeletion(redirectUrl: String!): AccountRequestDeletion
   accountDelete(token: String!): AccountDelete
+  onboarding(input: OnboardingInput!): Onboarding
   accountUpdateMeta(input: MetaInput!): AccountUpdateMeta @deprecated(reason: "Use the `updateMetadata` mutation. This field will be removed after 2020-07-31.")
   addressCreate(input: AddressInput!, userId: ID!): AddressCreate
   addressUpdate(id: ID!, input: AddressInput!): AddressUpdate
@@ -2899,6 +2900,19 @@ interface ObjectWithMetadata {
   metadata: [MetadataItem]!
   privateMeta: [MetaStore]! @deprecated(reason: "Use the `privetaMetadata` field. This field will be removed after 2020-07-31.")
   meta: [MetaStore]! @deprecated(reason: "Use the `metadata` field. This field will be removed after 2020-07-31.")
+}
+
+type Onboarding {
+  errors: [Error!]! @deprecated(reason: "Use typed errors with error codes. This field will be removed after 2020-07-31.")
+  requiresConfirmation: Boolean
+  accountErrors: [AccountError!]!
+  user: User
+}
+
+input OnboardingInput {
+  email: String!
+  password: String!
+  inviteCode: String!
 }
 
 type Order implements Node & ObjectWithMetadata {

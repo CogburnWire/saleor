@@ -31,6 +31,7 @@ from .mutations.account import (
     AccountUpdateMeta,
     ConfirmEmailChange,
     RequestEmailChange,
+    Onboarding,
 )
 from .mutations.base import (
     ConfirmAccount,
@@ -247,6 +248,8 @@ class AccountMutations(graphene.ObjectType):
     account_update = AccountUpdate.Field()
     account_request_deletion = AccountRequestDeletion.Field()
     account_delete = AccountDelete.Field()
+
+    onboarding = Onboarding.Field()
 
     account_update_meta = AccountUpdateMeta.Field(
         deprecation_reason=(
