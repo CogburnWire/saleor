@@ -17,6 +17,7 @@ from ...core.mutations import BaseMutation, ModelDeleteMutation, ModelMutation
 from ...core.types.common import AccountError
 from ...meta.deprecated.mutations import UpdateMetaBaseMutation
 from ...meta.deprecated.types import MetaInput
+from ....plugins.subbly.models import SubblySubscription
 from ..i18n import I18nMixin
 from .base import (
     INVALID_TOKEN,
@@ -24,6 +25,65 @@ from .base import (
     BaseAddressUpdate,
     BaseCustomerCreate,
 )
+
+
+class OnboardingInput(graphene.InputObjectType):
+    email = graphene.String(description="The email address of the user.", required=True)
+    password = graphene.String(description="Password.", required=True)
+    invite_code = graphene.String(description="Box invite code.", required=True)
+
+
+class Onboarding(ModelMutation):
+    class Arguments:
+        input = OnboardingInput(
+            description="Fields required to create a user.", required=True
+        )
+
+    requires_confirmation = graphene.Boolean(
+        description="Informs whether users need to confirm their email address."
+    )
+
+    class Meta:
+        description = "Register a new user."
+        exclude = ["password"]
+        model = models.User
+        error_type_class = AccountError
+        error_type_field = "account_errors"
+
+    """
+    @classmethod
+    def mutate(cls, root, info, **data):
+        response = super().mutate(root, info, **data)
+        response.requires_confirmation = settings.ENABLE_ACCOUNT_CONFIRMATION_BY_EMAIL
+        return response
+    """
+
+    @classmethod
+    def clean_input(cls, info, instance, data, input_cls=None):
+        password = data["password"]
+        try:
+            password_validation.validate_password(password, instance)
+        except ValidationError as error:
+            raise ValidationError({"password": error})
+
+        # invite code should be valid
+        invite_code = data["invite_code"]
+        try:
+            SubblySubscription.objects.get(invite_code=invite_code)
+        except SubblySubscription.DoesNotExist:
+            raise ValidationError({"invite_code": "Invalid invite code."})
+
+        return super().clean_input(info, instance, data, input_cls=None)
+
+    @classmethod
+    def save(cls, info, user, cleaned_input):
+        password = cleaned_input["password"]
+        user.set_password(password)
+        user.is_active = True
+
+        user.save()
+        account_events.customer_account_created_event(user=user)
+        info.context.plugins.customer_created(customer=user)
 
 
 class AccountRegisterInput(graphene.InputObjectType):
