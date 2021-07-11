@@ -44,7 +44,7 @@ class Onboarding(ModelMutation):
     )
 
     class Meta:
-        description = "Register a new user."
+        description = "Onboard a new user."
         exclude = ["password"]
         model = models.User
         error_type_class = AccountError
