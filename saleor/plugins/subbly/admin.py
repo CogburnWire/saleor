@@ -1,3 +1,8 @@
 from django.contrib import admin
 
-# Register your models here.
+from .models import SubblySubscription
+
+
+@admin.register(SubblySubscription)
+class SubblySubscriptionAdmin(admin.ModelAdmin):
+    fields = ("id", "email", "subscription_id")
