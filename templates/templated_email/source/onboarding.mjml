@@ -13,7 +13,7 @@
           {% trans "Hi!" context "Standard e-mail greeting" %}
         </mj-text>
         <mj-text>
-          {% blocktrans trimmed context "Account confirmation e-mail text" %}
+          {% blocktrans trimmed context "Marketplace invitation e-mail text" %}
             Your Touch of Utah box is on it’s way, and soon you’ll devour the best products Utah has to offer!
           {% endblocktrans %}
         </mj-text>

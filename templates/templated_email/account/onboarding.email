@@ -1,0 +1,25 @@
+{% load i18n %}
+
+{% block subject %}
+  {% trans "Marketplace invitation e-mail" context "Marketplace invitation e-mail subject" %}
+{% endblock %}
+
+{% block plain %}
+{% include 'templated_email/shared/_header.email' %}
+{% blocktrans context "Marketplace invitation e-mail text" %}
+Your Touch of Utah box is on it’s way, and soon you’ll devour the best products Utah has to offer!
+
+One question we get all the time is, ‘How do I get more?’
+
+As a Touch of Utah subscriber, you have early access to the Farmers Feeding Utah, Inc Marketplace.
+You can order as much of any (or all) items from this month’s box by clicking the link below:
+{% endblocktrans %}
+
+{{ onboarding_url | safe }}
+
+{% include 'templated_email/shared/_footer.email' %}
+{% endblock %}
+
+{% block html %}
+{% include 'templated_email/compiled/onboarding.html' %}
+{% endblock %}
