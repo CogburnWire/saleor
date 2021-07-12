@@ -1,0 +1,36 @@
+<mjml>
+  <mj-head>
+    <mj-include path="./shared/styles.mjml" />
+  </mj-head>
+  <mj-body>
+    <mj-raw>
+      {% load i18n %}
+    </mj-raw>
+    <mj-include path="./shared/header.mjml" />
+    <mj-section>
+      <mj-column>
+        <mj-text font-size="16px">
+          {% trans "Hi!" context "Standard e-mail greeting" %}
+        </mj-text>
+        <mj-text>
+          {% blocktrans trimmed context "Account confirmation e-mail text" %}
+            Your Touch of Utah box is on it’s way, and soon you’ll devour the best products Utah has to offer!
+          {% endblocktrans %}
+        </mj-text>
+        <mj-text>
+            One question we get all the time is, ‘How do I get more?’
+        </mj-text>
+        <mj-text>
+            As a Touch of Utah subscriber, you have early access to the Farmers Feeding Utah, Inc Marketplace.
+            You can order as much of any (or all) items from this month’s box by clicking the link below:
+        </mj-text>
+        <mj-text>
+          <a href="{{ onboarding_url | safe }}">
+            {{ onboarding_url | safe }}
+          </a>
+        </mj-text>
+      </mj-column>
+    </mj-section>
+    <mj-include path="./shared/footer.mjml" />
+  </mj-body>
+</mjml>
