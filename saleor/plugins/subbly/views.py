@@ -16,7 +16,7 @@ def subscription_created(request: HttpRequest) -> JsonResponse:
         customer = payload.get("customer").get("user", {})
 
         # Create subscription object
-        SubblySubscription.objects.create(
+        subscription = SubblySubscription.objects.create(
             subscription_id=payload.get("id"),
             first_name=customer.get("first_name"),
             last_name=customer.get("last_name"),
@@ -25,7 +25,10 @@ def subscription_created(request: HttpRequest) -> JsonResponse:
 
         onboarding_url = configuration["Onboarding url"]
         send_customer_invitation_email.delay(
-            onboarding_url, customer.get("email"), customer.get("first_name")
+            onboarding_url=onboarding_url,
+            customer_email=customer.get("email"),
+            first_name=customer.get("first_name"),
+            invite_code=subscription.invite_code,
         )
 
         return JsonResponse({"working": "yes"})
