@@ -11,6 +11,7 @@ from ....checkout import AddressType
 from ....core.jwt import create_token, jwt_decode
 from ....core.utils.url import validate_storefront_url
 from ....plugins.subbly.models import SubblySubscription
+from ....plugins.subbly.tasks import send_customer_invitation_email
 from ....settings import JWT_TTL_REQUEST_EMAIL_CHANGE
 from ...account.enums import AddressTypeEnum
 from ...account.types import Address, AddressInput, User
@@ -78,10 +79,19 @@ class Onboarding(ModelMutation):
     @classmethod
     def save(cls, info, user, cleaned_input):
         password = cleaned_input["password"]
+        subscription = SubblySubscription.objects.get(
+            invite_code=cleaned_input["invite_code"], email=cleaned_input["email"]
+        )
         user.set_password(password)
+        user.first_name = subscription.first_name
+        user.last_name = subscription.last_name
         user.is_active = True
-
         user.save()
+
+        onboarding_url = settings.get("STOREFRONT_URL", "")
+        send_customer_invitation_email.delay(
+            onboarding_url, user.email, user.first_name
+        )
         account_events.customer_account_created_event(user=user)
         info.context.plugins.customer_created(customer=user)
 
