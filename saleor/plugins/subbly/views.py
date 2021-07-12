@@ -1,6 +1,5 @@
 import json
 
-from django.conf import settings
 from django.http import HttpRequest, JsonResponse
 
 from ..models import PluginConfiguration
@@ -24,7 +23,7 @@ def subscription_created(request: HttpRequest) -> JsonResponse:
             email=customer.get("email"),
         )
 
-        onboarding_url = configuration["onboarding_url"]
+        onboarding_url = configuration["Onboarding url"]
         send_customer_invitation_email.delay(
             onboarding_url, customer.get("email"), customer.get("first_name")
         )
