@@ -70,10 +70,7 @@ class Onboarding(ModelMutation):
         # invite code should be valid and belongs to the subscriber's email
         invite_code = data["invite_code"]
         try:
-            SubblySubscription.objects.get(
-                invite_code=invite_code,
-                email=data["email"]
-            )
+            SubblySubscription.objects.get(invite_code=invite_code, email=data["email"])
         except SubblySubscription.DoesNotExist:
             raise ValidationError({"invite_code": "Invalid invite code."})
 
@@ -83,8 +80,7 @@ class Onboarding(ModelMutation):
     def save(cls, info, user, cleaned_input):
         password = cleaned_input["password"]
         subscription = SubblySubscription.objects.get(
-            invite_code=cleaned_input["invite_code"],
-            email=cleaned_input["email"]
+            invite_code=cleaned_input["invite_code"], email=cleaned_input["email"]
         )
         user.set_password(password)
         user.first_name = subscription.first_name
@@ -94,9 +90,7 @@ class Onboarding(ModelMutation):
 
         onboarding_url = settings.get("STOREFRONT_URL", "")
         send_customer_invitation_email.delay(
-            onboarding_url,
-            user.email,
-            user.first_name
+            onboarding_url, user.email, user.first_name
         )
         account_events.customer_account_created_event(user=user)
         info.context.plugins.customer_created(customer=user)
