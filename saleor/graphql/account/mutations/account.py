@@ -11,7 +11,6 @@ from ....checkout import AddressType
 from ....core.jwt import create_token, jwt_decode
 from ....core.utils.url import validate_storefront_url
 from ....plugins.subbly.models import SubblySubscription
-from ....plugins.subbly.tasks import send_customer_invitation_email
 from ....settings import JWT_TTL_REQUEST_EMAIL_CHANGE
 from ...account.enums import AddressTypeEnum
 from ...account.types import Address, AddressInput, User
@@ -51,14 +50,6 @@ class Onboarding(ModelMutation):
         error_type_class = AccountError
         error_type_field = "account_errors"
 
-    """
-    @classmethod
-    def mutate(cls, root, info, **data):
-        response = super().mutate(root, info, **data)
-        response.requires_confirmation = settings.ENABLE_ACCOUNT_CONFIRMATION_BY_EMAIL
-        return response
-    """
-
     @classmethod
     def clean_input(cls, info, instance, data, input_cls=None):
         password = data["password"]
@@ -88,10 +79,6 @@ class Onboarding(ModelMutation):
         user.is_active = True
         user.save()
 
-        onboarding_url = settings.get("STOREFRONT_URL", "")
-        send_customer_invitation_email.delay(
-            onboarding_url, user.email, user.first_name
-        )
         account_events.customer_account_created_event(user=user)
         info.context.plugins.customer_created(customer=user)
 

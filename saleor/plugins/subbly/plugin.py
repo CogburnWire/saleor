@@ -16,6 +16,11 @@ class SubblyPlugin(BasePlugin):
             "help_text": "Provide your subbly secret key",
             "label": "Secret",
         },
+        "Onboarding url": {
+            "type": ConfigurationTypeField.STRING,
+            "help_text": "Storefront onboarding url",
+            "label": "Storefront onboarding url",
+        },
         "Test mode": {
             "type": ConfigurationTypeField.BOOLEAN,
             "help_text": "Run plugin in test mode",
@@ -38,6 +43,7 @@ class SubblyPlugin(BasePlugin):
         {"name": "Test mode", "value": False},
         {"name": "Bcc Addresses", "value": None},
         {"name": "Test mode email", "value": None},
+        {"name": "Onboarding url", "value": None},
     ]
 
     DEFAULT_ACTIVE = False
